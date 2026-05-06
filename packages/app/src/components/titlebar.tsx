@@ -11,6 +11,7 @@ import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
+import { WORKSPACES_HIDDEN } from "@/constants/feature-flags"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
 
 type TauriDesktopWindow = {
@@ -217,6 +218,23 @@ export function Titlebar() {
             </Button>
           </TooltipKeybind>
           <div class="hidden xl:flex items-center shrink-0">
+            <Show when={WORKSPACES_HIDDEN && hasProjects()}>
+              <TooltipKeybind
+                placement="bottom"
+                title={language.t("command.sidebar.toggle")}
+                keybind={command.keybind("sidebar.toggle")}
+                openDelay={2000}
+              >
+                <Button
+                  variant="ghost"
+                  icon={layout.sidebar.opened() ? "sidebar-active" : "sidebar"}
+                  class="titlebar-icon w-8 h-6 p-0 box-border"
+                  onClick={() => layout.sidebar.toggle()}
+                  aria-label={language.t("command.sidebar.toggle")}
+                  aria-expanded={layout.sidebar.opened()}
+                />
+              </TooltipKeybind>
+            </Show>
             <Show when={params.dir}>
               <div
                 class="flex items-center shrink-0 w-8 mr-1"

@@ -58,6 +58,7 @@ import { setSessionHandoff } from "@/pages/session/handoff"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
+import { WORKSPACES_HIDDEN } from "@/constants/feature-flags"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { DebugBar } from "@/components/debug-bar"
 import { Titlebar } from "@/components/titlebar"
@@ -1791,12 +1792,13 @@ export default function Layout(props: ParentProps) {
   )
 
   createEffect(() => {
-    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 48
+    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : WORKSPACES_HIDDEN ? 0 : 48
     document.documentElement.style.setProperty("--dialog-left-margin", `${sidebarWidth}px`)
   })
 
+  const rail = () => (WORKSPACES_HIDDEN ? 0 : 64)
   const side = createMemo(() => Math.max(layout.sidebar.width(), 244))
-  const panel = createMemo(() => Math.max(side() - 64, 0))
+  const panel = createMemo(() => Math.max(side() - rail(), 0))
 
   const loadedSessionDirs = new Set<string>()
 
@@ -2426,7 +2428,7 @@ export default function Layout(props: ParentProps) {
                   direction="horizontal"
                   size={layout.sidebar.width()}
                   min={244}
-                  max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + 64}
+                  max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + rail()}
                   onResize={(w) => {
                     setState("sizing", true)
                     if (sizet !== undefined) clearTimeout(sizet)
@@ -2439,7 +2441,7 @@ export default function Layout(props: ParentProps) {
 
             <div
               class="hidden xl:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
-              style={{ left: "calc(4rem + 12px)" }}
+              style={{ left: WORKSPACES_HIDDEN ? "12px" : "calc(4rem + 12px)" }}
             />
 
             <div class="xl:hidden">
@@ -2476,7 +2478,7 @@ export default function Layout(props: ParentProps) {
                   !state.sizing,
               }}
               style={{
-                "--main-left": layout.sidebar.opened() ? `${side()}px` : "4rem",
+                "--main-left": layout.sidebar.opened() ? `${side()}px` : WORKSPACES_HIDDEN ? "0px" : "4rem",
               }}
             >
               <main
@@ -2492,13 +2494,14 @@ export default function Layout(props: ParentProps) {
 
             <div
               classList={{
-                "hidden xl:flex absolute inset-y-0 left-16 z-30": true,
+                "hidden xl:flex absolute inset-y-0 z-30": true,
                 "opacity-100 translate-x-0 pointer-events-auto": state.peeked && !layout.sidebar.opened(),
                 "opacity-0 -translate-x-2 pointer-events-none": !state.peeked || layout.sidebar.opened(),
                 "transition-[opacity,transform] motion-reduce:transition-none": true,
                 "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
                 "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
               }}
+              style={{ left: `${rail()}px` }}
               onMouseMove={disarm}
               onMouseEnter={() => {
                 disarm()
@@ -2523,7 +2526,7 @@ export default function Layout(props: ParentProps) {
                 "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
                 "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
               }}
-              style={{ left: `calc(4rem + ${panel()}px)` }}
+              style={{ left: `${rail() + panel()}px` }}
             >
               <div class="h-full w-px" style={{ "box-shadow": "var(--shadow-sidebar-overlay)" }} />
             </div>
