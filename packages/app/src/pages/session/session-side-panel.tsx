@@ -348,21 +348,23 @@ export function SessionSidePanel(props: {
               class="h-full min-h-0 flex flex-col overflow-hidden group/filetree"
               classList={{ "border-l border-border-weaker-base": reviewOpen() }}
             >
-              <div class="flex-1 min-h-0 bg-background-stronger px-3 py-0 overflow-hidden" data-scope="filetree">
-                <ScrollView class="h-full">
-                  <Switch>
-                    <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
-                    <Match when={true}>
-                      <FileTree
-                        path=""
-                        class="pt-3 pb-3"
-                        modified={diffFiles()}
-                        kinds={kinds()}
-                        onFileClick={(node) => openTab(file.tab(node.path))}
-                      />
-                    </Match>
-                  </Switch>
-                </ScrollView>
+              <div class="flex-1 min-h-0 bg-background-stronger px-3 overflow-hidden" data-scope="filetree">
+                <Switch>
+                  <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
+                  <Match when={true}>
+                    <ScrollView class="h-full -mx-3">
+                      <div class="px-3 pb-3">
+                        <FileTree
+                          path=""
+                          class="pt-3"
+                          modified={diffFiles()}
+                          kinds={kinds()}
+                          onFileClick={(node) => openTab(file.tab(node.path))}
+                        />
+                      </div>
+                    </ScrollView>
+                  </Match>
+                </Switch>
               </div>
             </div>
             <Show when={fileOpen()}>
