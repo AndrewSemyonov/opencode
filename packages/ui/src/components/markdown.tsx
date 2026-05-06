@@ -120,6 +120,30 @@ const PREVIEWABLE_FILE_EXTENSIONS = new Set([
   "gql",
   "dockerfile",
   "makefile",
+  "gitignore",
+  "dockerignore",
+  "gitattributes",
+  "gitmodules",
+  "npmrc",
+  "nvmrc",
+  "editorconfig",
+  "prettierrc",
+  "eslintrc",
+  "babelrc",
+  "license",
+  "licence",
+  "readme",
+  "copying",
+  "authors",
+  "contributors",
+  "changelog",
+  "notice",
+  "procfile",
+  "gemfile",
+  "rakefile",
+  "brewfile",
+  "vagrantfile",
+  "justfile",
   "png",
   "jpg",
   "jpeg",
@@ -302,10 +326,17 @@ function ensureCodeWrapper(block: HTMLPreElement, labels: CopyLabels) {
   }
 }
 
+function codePreviewableHref(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  return previewablePath(trimmed) ? trimmed : undefined
+}
+
 function markCodeLinks(root: HTMLDivElement) {
   const codeNodes = Array.from(root.querySelectorAll(":not(pre) > code"))
   for (const code of codeNodes) {
-    const href = codeUrl(code.textContent ?? "")
+    const text = code.textContent ?? ""
+    const href = codeUrl(text) ?? codePreviewableHref(text)
     const parentLink =
       code.parentElement instanceof HTMLAnchorElement && code.parentElement.classList.contains("external-link")
         ? code.parentElement
@@ -321,7 +352,7 @@ function markCodeLinks(root: HTMLDivElement) {
       continue
     }
 
-    const link = createExternalLink(href, code.textContent ?? "")
+    const link = createExternalLink(href, "")
     code.parentNode?.replaceChild(link, code)
     link.appendChild(code)
   }

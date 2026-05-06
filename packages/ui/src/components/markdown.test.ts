@@ -25,4 +25,19 @@ describe("previewablePath", () => {
   test("supports windows absolute file links", () => {
     expect(previewablePath("C:/repo/src/app.ts:7")).toBe("C:/repo/src/app.ts?start=7&end=7")
   })
+
+  test("supports common dotfiles", () => {
+    expect(previewablePath(".gitignore")).toBe(".gitignore")
+    expect(previewablePath("/Users/me/repo/.gitignore")).toBe("/Users/me/repo/.gitignore")
+    expect(previewablePath("packages/app/.gitignore:5")).toBe("packages/app/.gitignore?start=5&end=5")
+    expect(previewablePath(".editorconfig")).toBe(".editorconfig")
+    expect(previewablePath(".npmrc")).toBe(".npmrc")
+  })
+
+  test("supports extensionless project files", () => {
+    expect(previewablePath("LICENSE")).toBe("LICENSE")
+    expect(previewablePath("README")).toBe("README")
+    expect(previewablePath("CHANGELOG")).toBe("CHANGELOG")
+    expect(previewablePath("path/to/LICENSE:42")).toBe("path/to/LICENSE?start=42&end=42")
+  })
 })
