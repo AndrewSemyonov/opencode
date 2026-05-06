@@ -103,6 +103,7 @@ export const shouldFocusTerminalOnKeyDown = (event: Pick<KeyboardEvent, "key" | 
 
 export const createOpenReviewFile = (input: {
   showAllFiles: () => void
+  openReviewPanel?: () => void
   tabForPath: (path: string) => string
   openTab: (tab: string) => void
   setActive: (tab: string) => void
@@ -123,6 +124,7 @@ export const createOpenReviewFile = (input: {
   return (path: string) => {
     batch(() => {
       input.showAllFiles()
+      input.openReviewPanel?.()
       const range = lines(path)
       if (range) input.setSelectedLines?.(path, range)
       const maybePromise = input.loadFile(path)

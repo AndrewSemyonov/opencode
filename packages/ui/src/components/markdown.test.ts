@@ -10,6 +10,10 @@ describe("previewablePath", () => {
     expect(previewablePath("/repo/src/app.ts:12")).toBe("/repo/src/app.ts?start=12&end=12")
   })
 
+  test("supports yaml file links", () => {
+    expect(previewablePath("docker-compose.yml")).toBe("docker-compose.yml")
+  })
+
   test("supports filename-only paths without dot when explicitly allowed", () => {
     expect(previewablePath("Dockerfile")).toBe("Dockerfile")
   })

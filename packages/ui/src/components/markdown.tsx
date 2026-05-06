@@ -65,6 +65,7 @@ type CopyLabels = {
 }
 
 const urlPattern = /^https?:\/\/[^\s<>()`"']+$/
+const plainPattern = /(^|[\s([{"'])([^\s<>()\[\]{}"'`]+)(?=$|[\s)\]}>"',;!?])/g
 
 const PREVIEWABLE_FILE_EXTENSIONS = new Set([
   "md",
@@ -133,6 +134,15 @@ const PREVIEWABLE_FILE_EXTENSIONS = new Set([
   "flac",
 ])
 
+type PathPart = {
+  type: "text" | "link"
+  value: string
+}
+
+function trimPathToken(text: string) {
+  return text.replace(/[),.;!?]+$/, "")
+}
+
 export function previewablePath(href: string): string | undefined {
   if (!href) return
   if (href.startsWith("#")) return
@@ -145,6 +155,8 @@ export function previewablePath(href: string): string | undefined {
     decoded = href
   }
 
+  decoded = trimPathToken(decoded)
+
   const raw = decoded.split("#")[0]?.split("?")[0]
   if (!raw) return
 
@@ -154,12 +166,51 @@ export function previewablePath(href: string): string | undefined {
   const last = path.split("/").pop() ?? ""
   const lower = last.toLowerCase()
   const dot = lower.lastIndexOf(".")
-  const ext = dot > 0 && dot < lower.length - 1 ? lower.slice(dot + 1) : lower
+  const ext =
+    dot === 0 ? lower.slice(1) : dot > 0 && dot < lower.length - 1 ? lower.slice(dot + 1) : lower
 
   if (!PREVIEWABLE_FILE_EXTENSIONS.has(ext)) return
 
   if (!line) return path
   return `${path}?start=${line}&end=${line}`
+}
+
+export function previewableTextParts(text: string) {
+  const out: PathPart[] = []
+
+  const push = (type: PathPart["type"], value: string) => {
+    if (!value) return
+    const last = out[out.length - 1]
+    if (type === "text" && last?.type === "text") {
+      last.value += value
+      return
+    }
+    out.push({ type, value })
+  }
+
+  let idx = 0
+  for (const match of text.matchAll(plainPattern)) {
+    const full = match[0] ?? ""
+    const lead = match[1] ?? ""
+    const token = match[2] ?? ""
+    const start = match.index ?? 0
+
+    push("text", text.slice(idx, start))
+    push("text", lead)
+
+    const value = trimPathToken(token)
+    if (previewablePath(value)) {
+      push("link", value)
+      push("text", token.slice(value.length))
+    } else {
+      push("text", token)
+    }
+
+    idx = start + full.length
+  }
+
+  push("text", text.slice(idx))
+  return out
 }
 
 function codeUrl(text: string) {
@@ -200,6 +251,16 @@ function createCopyButton(labels: CopyLabels) {
   button.appendChild(createIcon(iconPaths.copy, "copy-icon"))
   button.appendChild(createIcon(iconPaths.check, "check-icon"))
   return button
+}
+
+function createExternalLink(href: string, text: string) {
+  const link = document.createElement("a")
+  link.setAttribute("href", href)
+  link.className = "external-link"
+  link.target = "_blank"
+  link.rel = "noopener noreferrer"
+  link.textContent = text
+  return link
 }
 
 function setCopyState(button: HTMLButtonElement, labels: CopyLabels, copied: boolean) {
@@ -260,13 +321,43 @@ function markCodeLinks(root: HTMLDivElement) {
       continue
     }
 
-    const link = document.createElement("a")
-    link.href = href
-    link.className = "external-link"
-    link.target = "_blank"
-    link.rel = "noopener noreferrer"
+    const link = createExternalLink(href, code.textContent ?? "")
     code.parentNode?.replaceChild(link, code)
     link.appendChild(code)
+  }
+}
+
+function markPlainPaths(root: HTMLDivElement) {
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!(node instanceof Text)) return NodeFilter.FILTER_REJECT
+      if (!node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT
+      const parent = node.parentElement
+      if (!parent) return NodeFilter.FILTER_REJECT
+      if (parent.closest("a, code, pre")) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+
+  const nodes: Text[] = []
+  while (walk.nextNode()) {
+    if (walk.currentNode instanceof Text) nodes.push(walk.currentNode)
+  }
+
+  for (const node of nodes) {
+    const parts = previewableTextParts(node.nodeValue ?? "")
+    if (!parts.some((part) => part.type === "link")) continue
+
+    const frag = document.createDocumentFragment()
+    for (const part of parts) {
+      if (part.type === "text") {
+        frag.append(part.value)
+        continue
+      }
+      frag.append(createExternalLink(part.value, part.value))
+    }
+
+    node.parentNode?.replaceChild(frag, node)
   }
 }
 
@@ -276,6 +367,7 @@ function decorate(root: HTMLDivElement, labels: CopyLabels) {
     ensureCodeWrapper(block, labels)
   }
   markCodeLinks(root)
+  markPlainPaths(root)
 }
 
 function setupLinkInterception(root: HTMLDivElement, openLocalFile: (path: string) => void) {
