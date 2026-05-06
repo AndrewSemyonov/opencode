@@ -447,8 +447,12 @@ export function FileTabContent(props: { tab: string }) {
   )
 
   return (
-    <Tabs.Content value={props.tab} class="mt-3 relative h-full">
-      <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll as any}>
+    <Tabs.Content value={props.tab} class="mt-3 relative flex flex-col h-full overflow-hidden contain-strict">
+      <ScrollView
+        class="flex-1 min-h-0"
+        viewportRef={scrollSync.setViewport}
+        onScroll={scrollSync.handleScroll as any}
+      >
         <Switch>
           <Match when={state()?.loaded}>{renderFile(contents())}</Match>
           <Match when={state()?.loading}>

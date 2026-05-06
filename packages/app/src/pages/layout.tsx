@@ -1956,7 +1956,6 @@ export default function Layout(props: ParentProps) {
     sidebarHovering,
     clearHoverProjectSoon,
     prefetchSession,
-    archiveSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2002,7 +2001,6 @@ export default function Layout(props: ParentProps) {
       sidebarExpanded,
       clearHoverProjectSoon,
       prefetchSession,
-      archiveSession,
     },
   }
 
@@ -2217,7 +2215,6 @@ export default function Layout(props: ParentProps) {
                                     sidebarExpanded={projectSidebarCtx.sessionProps.sidebarExpanded}
                                     clearHoverProjectSoon={projectSidebarCtx.sessionProps.clearHoverProjectSoon}
                                     prefetchSession={projectSidebarCtx.sessionProps.prefetchSession}
-                                    archiveSession={projectSidebarCtx.sessionProps.archiveSession}
                                   />
                                 )}
                               </For>
