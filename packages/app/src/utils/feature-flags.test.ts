@@ -6,12 +6,16 @@ describe("feature flags", () => {
     localStorage.clear()
   })
 
-  test("local storage flags are disabled by default", () => {
+  test("readLocalStorageFlag uses defaultValue when key is unset", () => {
     expect(readLocalStorageFlag(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY)).toBe(false)
-    expect(isPromptInputTrayEnabled()).toBe(false)
+    expect(readLocalStorageFlag(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY, true)).toBe(true)
   })
 
-  test("local storage flags accept truthy values", () => {
+  test("prompt input tray is enabled by default", () => {
+    expect(isPromptInputTrayEnabled()).toBe(true)
+  })
+
+  test("prompt input tray accepts explicit truthy values", () => {
     localStorage.setItem(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY, "true")
     expect(isPromptInputTrayEnabled()).toBe(true)
 
@@ -19,8 +23,19 @@ describe("feature flags", () => {
     expect(isPromptInputTrayEnabled()).toBe(true)
   })
 
-  test("local storage flags ignore other values", () => {
+  test("prompt input tray accepts explicit falsy values", () => {
     localStorage.setItem(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY, "false")
     expect(isPromptInputTrayEnabled()).toBe(false)
+
+    localStorage.setItem(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY, "0")
+    expect(isPromptInputTrayEnabled()).toBe(false)
+
+    localStorage.setItem(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY, "off")
+    expect(isPromptInputTrayEnabled()).toBe(false)
+  })
+
+  test("prompt input tray falls back to default for unrecognized values", () => {
+    localStorage.setItem(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY, "maybe")
+    expect(isPromptInputTrayEnabled()).toBe(true)
   })
 })
