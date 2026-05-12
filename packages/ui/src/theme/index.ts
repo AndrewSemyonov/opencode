@@ -71,5 +71,6 @@ export {
   tokyonightTheme,
   vercelTheme,
   vesperTheme,
+  void0Theme,
   zenburnTheme,
 } from "./default-themes"

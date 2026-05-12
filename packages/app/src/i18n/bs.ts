@@ -34,8 +34,6 @@ export const dict = {
 
   "command.palette": "Paleta komandi",
 
-  "command.theme.cycle": "Promijeni temu",
-  "command.theme.set": "Koristi temu: {{theme}}",
   "command.theme.scheme.cycle": "Promijeni šemu boja",
   "command.theme.scheme.set": "Koristi šemu boja: {{scheme}}",
 
@@ -405,7 +403,6 @@ export const dict = {
   "toast.language.title": "Jezik",
   "toast.language.description": "Prebačeno na {{language}}",
 
-  "toast.theme.title": "Tema promijenjena",
   "toast.scheme.title": "Šema boja",
 
   "toast.workspace.enabled.title": "Radni prostori omogućeni",
@@ -634,8 +631,6 @@ export const dict = {
   "settings.general.row.appearance.description": "Prilagodi kako OpenCode izgleda na tvom uređaju",
   "settings.general.row.colorScheme.title": "Šema boja",
   "settings.general.row.colorScheme.description": "Odaberi da li OpenCode prati sistemsku, svijetlu ili tamnu temu",
-  "settings.general.row.theme.title": "Tema",
-  "settings.general.row.theme.description": "Prilagodi temu OpenCode-a.",
   "settings.general.row.font.title": "Font za kod",
   "settings.general.row.font.description": "Prilagodi font koji se koristi u blokovima koda i terminalima",
   "settings.general.row.uiFont.title": "UI font",

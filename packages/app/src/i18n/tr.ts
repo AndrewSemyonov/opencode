@@ -38,8 +38,6 @@ export const dict = {
 
   "command.palette": "Komut paleti",
 
-  "command.theme.cycle": "Tema değiştir",
-  "command.theme.set": "Tema kullan: {{theme}}",
   "command.theme.scheme.cycle": "Renk şemasını değiştir",
   "command.theme.scheme.set": "Renk şeması kullan: {{scheme}}",
 
@@ -408,7 +406,6 @@ export const dict = {
   "toast.language.title": "Dil",
   "toast.language.description": "{{language}} diline geçildi",
 
-  "toast.theme.title": "Tema değiştirildi",
   "toast.scheme.title": "Renk şeması",
 
   "toast.workspace.enabled.title": "Çalışma alanları etkinleştirildi",
@@ -641,8 +638,6 @@ export const dict = {
   "settings.general.row.colorScheme.title": "Renk şeması",
   "settings.general.row.colorScheme.description":
     "OpenCode'un sistem, açık veya koyu temayı takip etip etmeyeceğini seçin",
-  "settings.general.row.theme.title": "Tema",
-  "settings.general.row.theme.description": "OpenCode'un temasını özelleştirin.",
   "settings.general.row.font.title": "Kod Yazı Tipi",
   "settings.general.row.font.description": "Kod bloklarında ve terminallerde kullanılan yazı tipini özelleştirin",
   "settings.general.row.uiFont.title": "Arayüz Yazı Tipi",

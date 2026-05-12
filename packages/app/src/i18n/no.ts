@@ -37,8 +37,6 @@ export const dict = {
 
   "command.palette": "Kommandopalett",
 
-  "command.theme.cycle": "Bytt tema",
-  "command.theme.set": "Bruk tema: {{theme}}",
   "command.theme.scheme.cycle": "Bytt fargevalg",
   "command.theme.scheme.set": "Bruk fargevalg: {{scheme}}",
 
@@ -406,7 +404,6 @@ export const dict = {
   "toast.language.title": "Språk",
   "toast.language.description": "Byttet til {{language}}",
 
-  "toast.theme.title": "Tema byttet",
   "toast.scheme.title": "Fargevalg",
 
   "toast.workspace.enabled.title": "Arbeidsområder aktivert",
@@ -637,8 +634,6 @@ export const dict = {
   "settings.general.row.appearance.description": "Tilpass hvordan OpenCode ser ut på enheten din",
   "settings.general.row.colorScheme.title": "Fargevalg",
   "settings.general.row.colorScheme.description": "Velg om OpenCode skal følge systemets, lyst eller mørkt tema",
-  "settings.general.row.theme.title": "Tema",
-  "settings.general.row.theme.description": "Tilpass hvordan OpenCode er tematisert.",
   "settings.general.row.font.title": "Kodefont",
   "settings.general.row.font.description": "Tilpass skrifttypen som brukes i kodeblokker og terminaler",
   "settings.general.row.uiFont.title": "UI-skrift",
