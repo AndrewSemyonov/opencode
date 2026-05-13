@@ -4,6 +4,7 @@ import { Dynamic } from "solid-js/web"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import type { FileSearchHandle } from "@opencode-ai/ui/file"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
+import { isMdxPath, MdxViewer } from "@opencode-ai/ui/mdx"
 import { cloneSelectedLineRange, previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { createLineCommentController } from "@opencode-ai/ui/line-comment-annotations"
 import { sampledChecksum } from "@opencode-ai/shared/util/encode"
@@ -400,8 +401,16 @@ export function FileTabContent(props: { tab: string }) {
     scrollSync.queueRestore()
   })
 
-  const renderFile = (source: string) => (
-    <div class="relative overflow-hidden pb-40">
+  const renderFile = (source: string) => {
+    if (isMdxPath(path())) {
+      return (
+        <div class="relative overflow-hidden pb-40">
+          <MdxViewer text={source} path={path() ?? undefined} />
+        </div>
+      )
+    }
+    return (
+      <div class="relative overflow-hidden pb-40">
       <Dynamic
         component={fileComponent}
         mode="text"
@@ -443,8 +452,9 @@ export function FileTabContent(props: { tab: string }) {
           },
         }}
       />
-    </div>
-  )
+      </div>
+    )
+  }
 
   return (
     <Tabs.Content value={props.tab} class="mt-3 relative h-full">
