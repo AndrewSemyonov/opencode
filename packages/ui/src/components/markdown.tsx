@@ -1,5 +1,6 @@
 import { useMarked } from "../context/marked"
 import { useI18n } from "../context/i18n"
+import { useOpenLocalFile } from "../context/file"
 import DOMPurify from "dompurify"
 import morphdom from "morphdom"
 import { checksum } from "@opencode-ai/shared/util/encode"
@@ -64,6 +65,177 @@ type CopyLabels = {
 }
 
 const urlPattern = /^https?:\/\/[^\s<>()`"']+$/
+const plainPattern = /(^|[\s([{"'])([^\s<>()\[\]{}"'`]+)(?=$|[\s)\]}>"',;!?])/g
+
+const PREVIEWABLE_FILE_EXTENSIONS = new Set([
+  "md",
+  "markdown",
+  "mdx",
+  "txt",
+  "log",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "jsonc",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "html",
+  "htm",
+  "xml",
+  "svg",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "env",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "swift",
+  "c",
+  "cc",
+  "cpp",
+  "h",
+  "hpp",
+  "cs",
+  "php",
+  "sh",
+  "bash",
+  "zsh",
+  "sql",
+  "lua",
+  "vue",
+  "svelte",
+  "astro",
+  "graphql",
+  "gql",
+  "dockerfile",
+  "makefile",
+  "gitignore",
+  "dockerignore",
+  "gitattributes",
+  "gitmodules",
+  "npmrc",
+  "nvmrc",
+  "editorconfig",
+  "prettierrc",
+  "eslintrc",
+  "babelrc",
+  "license",
+  "licence",
+  "readme",
+  "copying",
+  "authors",
+  "contributors",
+  "changelog",
+  "notice",
+  "procfile",
+  "gemfile",
+  "rakefile",
+  "brewfile",
+  "vagrantfile",
+  "justfile",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+  "ico",
+  "bmp",
+  "mp3",
+  "wav",
+  "ogg",
+  "flac",
+])
+
+type PathPart = {
+  type: "text" | "link"
+  value: string
+}
+
+function trimPathToken(text: string) {
+  return text.replace(/[),.;!?]+$/, "")
+}
+
+export function previewablePath(href: string): string | undefined {
+  if (!href) return
+  if (href.startsWith("#")) return
+  if (!/^[A-Za-z]:[\\/]/.test(href) && /^[a-z][a-z0-9+.-]*:/i.test(href)) return
+
+  let decoded: string
+  try {
+    decoded = decodeURI(href)
+  } catch {
+    decoded = href
+  }
+
+  decoded = trimPathToken(decoded)
+
+  const raw = decoded.split("#")[0]?.split("?")[0]
+  if (!raw) return
+
+  const match = raw.match(/^(.*):(\d+)$/)
+  const path = match?.[1] || raw
+  const line = match?.[2]
+  const last = path.split("/").pop() ?? ""
+  const lower = last.toLowerCase()
+  const dot = lower.lastIndexOf(".")
+  const ext =
+    dot === 0 ? lower.slice(1) : dot > 0 && dot < lower.length - 1 ? lower.slice(dot + 1) : lower
+
+  if (!PREVIEWABLE_FILE_EXTENSIONS.has(ext)) return
+
+  if (!line) return path
+  return `${path}?start=${line}&end=${line}`
+}
+
+export function previewableTextParts(text: string) {
+  const out: PathPart[] = []
+
+  const push = (type: PathPart["type"], value: string) => {
+    if (!value) return
+    const last = out[out.length - 1]
+    if (type === "text" && last?.type === "text") {
+      last.value += value
+      return
+    }
+    out.push({ type, value })
+  }
+
+  let idx = 0
+  for (const match of text.matchAll(plainPattern)) {
+    const full = match[0] ?? ""
+    const lead = match[1] ?? ""
+    const token = match[2] ?? ""
+    const start = match.index ?? 0
+
+    push("text", text.slice(idx, start))
+    push("text", lead)
+
+    const value = trimPathToken(token)
+    if (previewablePath(value)) {
+      push("link", value)
+      push("text", token.slice(value.length))
+    } else {
+      push("text", token)
+    }
+
+    idx = start + full.length
+  }
+
+  push("text", text.slice(idx))
+  return out
+}
 
 function codeUrl(text: string) {
   const href = text.trim().replace(/[),.;!?]+$/, "")
@@ -105,6 +277,16 @@ function createCopyButton(labels: CopyLabels) {
   return button
 }
 
+function createExternalLink(href: string, text: string) {
+  const link = document.createElement("a")
+  link.setAttribute("href", href)
+  link.className = "external-link"
+  link.target = "_blank"
+  link.rel = "noopener noreferrer"
+  link.textContent = text
+  return link
+}
+
 function setCopyState(button: HTMLButtonElement, labels: CopyLabels, copied: boolean) {
   if (copied) {
     button.setAttribute("data-copied", "true")
@@ -144,10 +326,17 @@ function ensureCodeWrapper(block: HTMLPreElement, labels: CopyLabels) {
   }
 }
 
+function codePreviewableHref(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  return previewablePath(trimmed) ? trimmed : undefined
+}
+
 function markCodeLinks(root: HTMLDivElement) {
   const codeNodes = Array.from(root.querySelectorAll(":not(pre) > code"))
   for (const code of codeNodes) {
-    const href = codeUrl(code.textContent ?? "")
+    const text = code.textContent ?? ""
+    const href = codeUrl(text) ?? codePreviewableHref(text)
     const parentLink =
       code.parentElement instanceof HTMLAnchorElement && code.parentElement.classList.contains("external-link")
         ? code.parentElement
@@ -163,13 +352,43 @@ function markCodeLinks(root: HTMLDivElement) {
       continue
     }
 
-    const link = document.createElement("a")
-    link.href = href
-    link.className = "external-link"
-    link.target = "_blank"
-    link.rel = "noopener noreferrer"
+    const link = createExternalLink(href, "")
     code.parentNode?.replaceChild(link, code)
     link.appendChild(code)
+  }
+}
+
+function markPlainPaths(root: HTMLDivElement) {
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!(node instanceof Text)) return NodeFilter.FILTER_REJECT
+      if (!node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT
+      const parent = node.parentElement
+      if (!parent) return NodeFilter.FILTER_REJECT
+      if (parent.closest("a, code, pre")) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+
+  const nodes: Text[] = []
+  while (walk.nextNode()) {
+    if (walk.currentNode instanceof Text) nodes.push(walk.currentNode)
+  }
+
+  for (const node of nodes) {
+    const parts = previewableTextParts(node.nodeValue ?? "")
+    if (!parts.some((part) => part.type === "link")) continue
+
+    const frag = document.createDocumentFragment()
+    for (const part of parts) {
+      if (part.type === "text") {
+        frag.append(part.value)
+        continue
+      }
+      frag.append(createExternalLink(part.value, part.value))
+    }
+
+    node.parentNode?.replaceChild(frag, node)
   }
 }
 
@@ -179,6 +398,32 @@ function decorate(root: HTMLDivElement, labels: CopyLabels) {
     ensureCodeWrapper(block, labels)
   }
   markCodeLinks(root)
+  markPlainPaths(root)
+}
+
+function setupLinkInterception(root: HTMLDivElement, openLocalFile: (path: string) => void) {
+  const handleClick = (event: MouseEvent) => {
+    if (event.defaultPrevented) return
+    if (event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const anchor = target.closest("a")
+    if (!(anchor instanceof HTMLAnchorElement)) return
+    if (!root.contains(anchor)) return
+
+    const href = anchor.getAttribute("href") ?? ""
+    const path = previewablePath(href)
+    if (!path) return
+
+    event.preventDefault()
+    openLocalFile(path)
+  }
+
+  root.addEventListener("click", handleClick)
+  return () => root.removeEventListener("click", handleClick)
 }
 
 function setupCodeCopy(root: HTMLDivElement, getLabels: () => CopyLabels) {
@@ -248,6 +493,7 @@ export function Markdown(
   const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList"])
   const marked = useMarked()
   const i18n = useI18n()
+  const openLocalFile = useOpenLocalFile()
   const [root, setRoot] = createSignal<HTMLDivElement>()
   const [html] = createResource(
     () => ({
@@ -286,6 +532,7 @@ export function Markdown(
   )
 
   let copyCleanup: (() => void) | undefined
+  let linkCleanup: (() => void) | undefined
 
   createEffect(() => {
     const container = root()
@@ -328,10 +575,13 @@ export function Markdown(
         copy: i18n.t("ui.message.copy"),
         copied: i18n.t("ui.message.copied"),
       }))
+
+    if (!linkCleanup) linkCleanup = setupLinkInterception(container, openLocalFile)
   })
 
   onCleanup(() => {
     if (copyCleanup) copyCleanup()
+    if (linkCleanup) linkCleanup()
   })
 
   return (

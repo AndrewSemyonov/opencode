@@ -30,7 +30,7 @@ import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { useProviders } from "@/hooks/use-providers"
 import { useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
-import { isPromptInputTrayEnabled } from "@/utils/feature-flags"
+import { HIDE_PROMPT_INPUT_TRAY } from "@/constants/feature-flags"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
@@ -169,7 +169,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     pathFromTab: files.pathFromTab,
     normalizeTab: (tab) => (tab.startsWith("file://") ? files.tab(tab) : tab),
   }).activeFileTab
-  const showPromptInputTray = createMemo(() => isPromptInputTrayEnabled())
 
   const commentInReview = (path: string) => {
     const sessionID = params.id
@@ -627,14 +626,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         type: "builtin" as const,
       }))
 
-    const custom = sync.data.command.map((cmd) => ({
-      id: `custom.${cmd.name}`,
-      trigger: cmd.name,
-      title: cmd.name,
-      description: cmd.description,
-      type: "custom" as const,
-      source: cmd.source,
-    }))
+    const custom = sync.data.command.map((cmd) => {
+      const title = cmd.title ?? cmd.name
+      const trigger = cmd.source === "skill" ? (cmd.aliases?.[0] ?? cmd.name) : cmd.name
+      return {
+        id: `custom.${cmd.name}`,
+        trigger,
+        title,
+        aliases: cmd.aliases,
+        search: [cmd.name, ...(cmd.aliases ?? [])].join(" "),
+        description: cmd.description,
+        type: "custom" as const,
+        source: cmd.source,
+      }
+    })
 
     return [...custom, ...builtin]
   })
@@ -666,7 +671,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   } = useFilteredList<SlashCommand>({
     items: slashCommands,
     key: (x) => x?.id,
-    filterKeys: ["trigger", "title"],
+    filterKeys: ["trigger", "title", "search"],
     onSelect: handleSlashSelect,
   })
 
@@ -1435,7 +1440,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </div>
         </div>
       </DockShellForm>
-      <Show when={showPromptInputTray() && (store.mode === "normal" || store.mode === "shell")}>
+      <Show when={!HIDE_PROMPT_INPUT_TRAY && (store.mode === "normal" || store.mode === "shell")}>
         <DockTray attach="top">
           <div class="px-1.75 pt-5.5 pb-2 flex items-center gap-2 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0 flex-1 relative">

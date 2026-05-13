@@ -58,6 +58,7 @@ import { setSessionHandoff } from "@/pages/session/handoff"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
+import { WORKSPACES_HIDDEN } from "@/constants/feature-flags"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { DebugBar } from "@/components/debug-bar"
 import { Titlebar } from "@/components/titlebar"
@@ -1186,7 +1187,9 @@ export default function Layout(props: ParentProps) {
       })
     }
 
-    return commands
+    return WORKSPACES_HIDDEN
+      ? commands.filter((command) => command.id !== "workspace.new" && command.id !== "workspace.toggle")
+      : commands
   })
 
   function connectProvider() {
@@ -1791,12 +1794,13 @@ export default function Layout(props: ParentProps) {
   )
 
   createEffect(() => {
-    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 48
+    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 0
     document.documentElement.style.setProperty("--dialog-left-margin", `${sidebarWidth}px`)
   })
 
-  const side = createMemo(() => Math.max(layout.sidebar.width(), 244))
-  const panel = createMemo(() => Math.max(side() - 64, 0))
+  const rail = () => (WORKSPACES_HIDDEN ? 0 : 64)
+  const side = createMemo(() => (layout.sidebar.opened() ? Math.max(layout.sidebar.width(), 244) : 0))
+  const panel = createMemo(() => Math.max(side() - rail(), 0))
 
   const loadedSessionDirs = new Set<string>()
 
@@ -1956,7 +1960,6 @@ export default function Layout(props: ParentProps) {
     sidebarHovering,
     clearHoverProjectSoon,
     prefetchSession,
-    archiveSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2002,7 +2005,6 @@ export default function Layout(props: ParentProps) {
       sidebarExpanded,
       clearHoverProjectSoon,
       prefetchSession,
-      archiveSession,
     },
   }
 
@@ -2040,9 +2042,7 @@ export default function Layout(props: ParentProps) {
       if (!searching()) return []
       const now = Date.now()
       const projects =
-        searchScope() === "all"
-          ? layout.projects.list()
-          : [project()].filter((p): p is LocalProject => !!p)
+        searchScope() === "all" ? layout.projects.list() : [project()].filter((p): p is LocalProject => !!p)
       return projects
         .map((p) => {
           const dirs = workspaceIds(p)
@@ -2217,7 +2217,6 @@ export default function Layout(props: ParentProps) {
                                     sidebarExpanded={projectSidebarCtx.sessionProps.sidebarExpanded}
                                     clearHoverProjectSoon={projectSidebarCtx.sessionProps.clearHoverProjectSoon}
                                     prefetchSession={projectSidebarCtx.sessionProps.prefetchSession}
-                                    archiveSession={projectSidebarCtx.sessionProps.archiveSession}
                                   />
                                 )}
                               </For>
@@ -2229,101 +2228,101 @@ export default function Layout(props: ParentProps) {
                   </div>
                 }
               >
-              <Show
-                when={workspacesEnabled()}
-                fallback={
+                <Show
+                  when={!WORKSPACES_HIDDEN && workspacesEnabled()}
+                  fallback={
+                    <>
+                      <div class="shrink-0 pt-4 pb-1 px-2 text-12-medium text-text-weak uppercase tracking-wide">
+                        {language.t("sidebar.heading.chats")}
+                      </div>
+                      <div class="shrink-0 pb-4">
+                        <Button
+                          size="large"
+                          icon="new-session"
+                          class="w-full"
+                          onClick={() => {
+                            const dir = worktree()
+                            if (!dir) return
+                            navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+                          }}
+                        >
+                          {language.t("command.session.new")}
+                        </Button>
+                      </div>
+                      <div class="flex-1 min-h-0">
+                        <Show when={project()}>
+                          {(p) => (
+                            <LocalWorkspace
+                              ctx={workspaceSidebarCtx}
+                              project={p()}
+                              sortNow={sortNow}
+                              mobile={panelProps.mobile}
+                            />
+                          )}
+                        </Show>
+                      </div>
+                    </>
+                  }
+                >
                   <>
-                    <div class="shrink-0 pt-4 pb-1 px-2 text-12-medium text-text-weak uppercase tracking-wide">
-                      {language.t("sidebar.heading.chats")}
-                    </div>
-                    <div class="shrink-0 pb-4">
+                    <div class="shrink-0 py-4">
                       <Button
                         size="large"
-                        icon="new-session"
+                        icon="plus-small"
                         class="w-full"
                         onClick={() => {
-                          const dir = worktree()
-                          if (!dir) return
-                          navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+                          const item = project()
+                          if (!item) return
+                          createWorkspace(item)
                         }}
                       >
-                        {language.t("command.session.new")}
+                        {language.t("workspace.new")}
                       </Button>
                     </div>
-                    <div class="flex-1 min-h-0">
-                      <Show when={project()}>
-                        {(p) => (
-                          <LocalWorkspace
-                            ctx={workspaceSidebarCtx}
-                            project={p()}
-                            sortNow={sortNow}
-                            mobile={panelProps.mobile}
-                          />
-                        )}
-                      </Show>
-                    </div>
-                  </>
-                }
-              >
-                <>
-                  <div class="shrink-0 py-4">
-                    <Button
-                      size="large"
-                      icon="plus-small"
-                      class="w-full"
-                      onClick={() => {
-                        const item = project()
-                        if (!item) return
-                        createWorkspace(item)
-                      }}
-                    >
-                      {language.t("workspace.new")}
-                    </Button>
-                  </div>
-                  <Show when={project()}>
-                    {(p) => (
-                      <div class="relative flex-1 min-h-0">
-                        <DragDropProvider
-                          onDragStart={handleWorkspaceDragStart}
-                          onDragEnd={handleWorkspaceDragEnd}
-                          onDragOver={handleWorkspaceDragOver}
-                          collisionDetector={closestCenter}
-                        >
-                          <DragDropSensors />
-                          <ConstrainDragXAxis />
-                          <div
-                            ref={(el) => {
-                              if (!panelProps.mobile) scrollContainerRef = el
-                            }}
-                            class="size-full flex flex-col py-2 gap-4 overflow-y-auto no-scrollbar [overflow-anchor:none]"
+                    <Show when={project()}>
+                      {(p) => (
+                        <div class="relative flex-1 min-h-0">
+                          <DragDropProvider
+                            onDragStart={handleWorkspaceDragStart}
+                            onDragEnd={handleWorkspaceDragEnd}
+                            onDragOver={handleWorkspaceDragOver}
+                            collisionDetector={closestCenter}
                           >
-                            <SortableProvider ids={workspaces()}>
-                              <For each={workspaces()}>
-                                {(directory) => (
-                                  <SortableWorkspace
-                                    ctx={workspaceSidebarCtx}
-                                    directory={directory}
-                                    project={p()}
-                                    sortNow={sortNow}
-                                    mobile={panelProps.mobile}
-                                  />
-                                )}
-                              </For>
-                            </SortableProvider>
-                          </div>
-                          <DragOverlay>
-                            <WorkspaceDragOverlay
-                              sidebarProject={sidebarProject}
-                              activeWorkspace={() => store.activeWorkspace}
-                              workspaceLabel={workspaceLabel}
-                            />
-                          </DragOverlay>
-                        </DragDropProvider>
-                      </div>
-                    )}
-                  </Show>
-                </>
-              </Show>
+                            <DragDropSensors />
+                            <ConstrainDragXAxis />
+                            <div
+                              ref={(el) => {
+                                if (!panelProps.mobile) scrollContainerRef = el
+                              }}
+                              class="size-full flex flex-col py-2 gap-4 overflow-y-auto no-scrollbar [overflow-anchor:none]"
+                            >
+                              <SortableProvider ids={workspaces()}>
+                                <For each={workspaces()}>
+                                  {(directory) => (
+                                    <SortableWorkspace
+                                      ctx={workspaceSidebarCtx}
+                                      directory={directory}
+                                      project={p()}
+                                      sortNow={sortNow}
+                                      mobile={panelProps.mobile}
+                                    />
+                                  )}
+                                </For>
+                              </SortableProvider>
+                            </div>
+                            <DragOverlay>
+                              <WorkspaceDragOverlay
+                                sidebarProject={sidebarProject}
+                                activeWorkspace={() => store.activeWorkspace}
+                                workspaceLabel={workspaceLabel}
+                              />
+                            </DragOverlay>
+                          </DragDropProvider>
+                        </div>
+                      )}
+                    </Show>
+                  </>
+                </Show>
               </Show>
             </div>
           </>
@@ -2426,7 +2425,7 @@ export default function Layout(props: ParentProps) {
                   direction="horizontal"
                   size={layout.sidebar.width()}
                   min={244}
-                  max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + 64}
+                  max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + rail()}
                   onResize={(w) => {
                     setState("sizing", true)
                     if (sizet !== undefined) clearTimeout(sizet)
@@ -2439,7 +2438,7 @@ export default function Layout(props: ParentProps) {
 
             <div
               class="hidden xl:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
-              style={{ left: "calc(4rem + 12px)" }}
+              style={{ left: WORKSPACES_HIDDEN ? "12px" : "calc(4rem + 12px)" }}
             />
 
             <div class="xl:hidden">
@@ -2476,7 +2475,7 @@ export default function Layout(props: ParentProps) {
                   !state.sizing,
               }}
               style={{
-                "--main-left": layout.sidebar.opened() ? `${side()}px` : "4rem",
+                "--main-left": layout.sidebar.opened() ? `${side()}px` : WORKSPACES_HIDDEN ? "0px" : "4rem",
               }}
             >
               <main
@@ -2492,13 +2491,14 @@ export default function Layout(props: ParentProps) {
 
             <div
               classList={{
-                "hidden xl:flex absolute inset-y-0 left-16 z-30": true,
+                "hidden xl:flex absolute inset-y-0 z-30": true,
                 "opacity-100 translate-x-0 pointer-events-auto": state.peeked && !layout.sidebar.opened(),
                 "opacity-0 -translate-x-2 pointer-events-none": !state.peeked || layout.sidebar.opened(),
                 "transition-[opacity,transform] motion-reduce:transition-none": true,
                 "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
                 "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
               }}
+              style={{ left: `${rail()}px` }}
               onMouseMove={disarm}
               onMouseEnter={() => {
                 disarm()
@@ -2523,7 +2523,7 @@ export default function Layout(props: ParentProps) {
                 "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
                 "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
               }}
-              style={{ left: `calc(4rem + ${panel()}px)` }}
+              style={{ left: `${rail() + panel()}px` }}
             >
               <div class="h-full w-px" style={{ "box-shadow": "var(--shadow-sidebar-overlay)" }} />
             </div>
