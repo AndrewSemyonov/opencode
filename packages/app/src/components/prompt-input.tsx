@@ -31,6 +31,7 @@ import { useProviders } from "@/hooks/use-providers"
 import { useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
 import { HIDE_PROMPT_INPUT_TRAY } from "@/constants/feature-flags"
+import { MODEL_SELECTOR_ENABLED } from "@/utils/feature-flags"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
@@ -1440,7 +1441,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </div>
         </div>
       </DockShellForm>
-      <Show when={!HIDE_PROMPT_INPUT_TRAY && (store.mode === "normal" || store.mode === "shell")}>
+      <Show when={(MODEL_SELECTOR_ENABLED || !HIDE_PROMPT_INPUT_TRAY) && (store.mode === "normal" || store.mode === "shell")}>
         <DockTray attach="top">
           <div class="px-1.75 pt-5.5 pb-2 flex items-center gap-2 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0 flex-1 relative">
@@ -1478,7 +1479,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                   </TooltipKeybind>
                 </div>
-                <Show when={store.mode !== "shell"}>
+                <Show when={MODEL_SELECTOR_ENABLED && store.mode !== "shell"}>
                   <div data-component="prompt-model-control">
                     <Show
                       when={providers.paid().length > 0}

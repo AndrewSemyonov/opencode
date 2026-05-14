@@ -17,7 +17,7 @@ export const PREFERRED_DEFAULT_MODEL = {
 
 export const HARDCODED_ACTIVE_MODEL: ModelKey | undefined = {
   providerID: "openrouter",
-  modelID: "openai/gpt-5.4-mini",
+  modelID: "google/gemini-2.5-flash",
 }
 
 export function formatActiveModelLabel(model: ActiveModelLabel) {
