@@ -30,7 +30,7 @@ import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { useProviders } from "@/hooks/use-providers"
 import { useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
-import { HIDE_PROMPT_INPUT_TRAY } from "@/constants/feature-flags"
+import { HIDE_MODEL_SELECTOR, HIDE_PROMPT_INPUT_TRAY } from "@/constants/feature-flags"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
@@ -1478,7 +1478,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                   </TooltipKeybind>
                 </div>
-                <Show when={store.mode !== "shell"}>
+                <Show when={!HIDE_MODEL_SELECTOR && store.mode !== "shell"}>
                   <div data-component="prompt-model-control">
                     <Show
                       when={providers.paid().length > 0}

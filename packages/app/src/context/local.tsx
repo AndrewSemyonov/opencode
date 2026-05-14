@@ -6,6 +6,7 @@ import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { HIDE_MODEL_SELECTOR } from "@/constants/feature-flags"
 import { formatActiveModelLabel, HARDCODED_ACTIVE_MODEL, PREFERRED_DEFAULT_MODEL } from "./model-defaults"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
@@ -224,7 +225,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const current = () => {
       const item = firstModel(
-        () => HARDCODED_ACTIVE_MODEL,
+        () => (HIDE_MODEL_SELECTOR ? HARDCODED_ACTIVE_MODEL : undefined),
         () => scope()?.model,
         configuredModel,
         recentModel,
