@@ -458,12 +458,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       onSelect: () => view().reviewPanel.toggle(),
     }),
     viewCommand({
-      id: "fileTree.toggle",
-      title: language.t("command.fileTree.toggle"),
-      keybind: "mod+\\",
-      onSelect: () => layout.fileTree.toggle(),
-    }),
-    viewCommand({
       id: "input.focus",
       title: language.t("command.input.focus"),
       keybind: "ctrl+l",

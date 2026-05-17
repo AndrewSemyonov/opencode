@@ -400,12 +400,11 @@ export default function Page() {
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const size = createSizing()
   const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
-  const desktopFileTreeOpen = createMemo(() => isDesktop() && layout.fileTree.opened())
-  const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
+  const desktopFileTreeOpen = createMemo(() => false)
+  const desktopSidePanelOpen = createMemo(() => desktopReviewOpen())
   const sessionPanelWidth = createMemo(() => {
-    if (!desktopSidePanelOpen()) return "100%"
-    if (desktopReviewOpen()) return `${layout.session.width()}px`
-    return `calc(100% - ${layout.fileTree.width()}px)`
+    if (!desktopReviewOpen()) return "100%"
+    return `${layout.session.width()}px`
   })
   const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
 
@@ -1870,11 +1869,11 @@ export default function Page() {
             width: sessionPanelWidth(),
           }}
         >
-          <div class="pointer-events-none absolute inset-y-0 right-0 z-0 hidden items-center pr-3 lg:flex" style={{ opacity: 0.1 }}>
-            <Logo class="w-[220px] text-text-strong" />
+          <div class="pointer-events-none absolute inset-0 z-0 flex items-center justify-center" style={{ opacity: 0.08 }}>
+            <Logo class="w-[320px] text-text-strong" />
           </div>
 
-          <div class="flex-1 min-h-0 overflow-hidden">
+          <div class="relative z-10 flex-1 min-h-0 overflow-hidden">
             <Switch>
               <Match when={params.id}>
                 <Show when={messagesReady()}>
