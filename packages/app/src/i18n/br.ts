@@ -824,4 +824,13 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "Falha ao criar ícone de projeto persistente",
   "error.childStore.storeCreateFailed": "Falha ao criar armazenamento",
   "terminal.connectionLost.abnormalClose": "WebSocket fechado anormalmente: {{code}}",
+  "session.report.generate": "Generate report",
+  "session.report.regenerate": "Regenerate",
+  "session.report.menuHeading": "Choose a skill",
+  "session.report.starting": "Starting…",
+  "session.report.notGenerated": "Report not generated yet",
+  "session.report.userMessage": "Generate {{title}}",
+  "sidebar.heading.reports": "Reports",
+  "sidebar.heading.files": "Files",
+  "sidebar.reports.empty": "No report skills available",
 }

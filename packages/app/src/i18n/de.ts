@@ -835,4 +835,13 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "Dauerhaftes Projekticon konnte nicht erstellt werden",
   "error.childStore.storeCreateFailed": "Speicher konnte nicht erstellt werden",
   "terminal.connectionLost.abnormalClose": "WebSocket abnormal geschlossen: {{code}}",
+  "session.report.generate": "Generate report",
+  "session.report.regenerate": "Regenerate",
+  "session.report.menuHeading": "Choose a skill",
+  "session.report.starting": "Starting…",
+  "session.report.notGenerated": "Report not generated yet",
+  "session.report.userMessage": "Generate {{title}}",
+  "sidebar.heading.reports": "Reports",
+  "sidebar.heading.files": "Files",
+  "sidebar.reports.empty": "No report skills available",
 } satisfies Partial<Record<Keys, string>>

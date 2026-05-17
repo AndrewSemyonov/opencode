@@ -882,4 +882,13 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "建立持續性專案圖示失敗",
   "error.childStore.storeCreateFailed": "建立儲存區失敗",
   "terminal.connectionLost.abnormalClose": "WebSocket 異常關閉：{{code}}",
+  "session.report.generate": "Generate report",
+  "session.report.regenerate": "Regenerate",
+  "session.report.menuHeading": "Choose a skill",
+  "session.report.starting": "Starting…",
+  "session.report.notGenerated": "Report not generated yet",
+  "session.report.userMessage": "Generate {{title}}",
+  "sidebar.heading.reports": "Reports",
+  "sidebar.heading.files": "Files",
+  "sidebar.reports.empty": "No report skills available",
 } satisfies Partial<Record<Keys, string>>

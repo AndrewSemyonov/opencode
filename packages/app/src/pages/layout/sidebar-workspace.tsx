@@ -259,7 +259,7 @@ export const WorkspaceSubsection = (props: {
   </Collapsible>
 )
 
-const FILES_ROOT_NAMES = ["reports"] as const
+const FILES_ROOT_NAMES = ["data-sources", "data", "datasets", "sources", "reports"] as const
 
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()

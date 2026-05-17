@@ -908,4 +908,13 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "Kalıcı proje simgesi oluşturulamadı",
   "error.childStore.storeCreateFailed": "Depo oluşturulamadı",
   "terminal.connectionLost.abnormalClose": "WebSocket anormal şekilde kapandı: {{code}}",
+  "session.report.generate": "Generate report",
+  "session.report.regenerate": "Regenerate",
+  "session.report.menuHeading": "Choose a skill",
+  "session.report.starting": "Starting…",
+  "session.report.notGenerated": "Report not generated yet",
+  "session.report.userMessage": "Generate {{title}}",
+  "sidebar.heading.reports": "Reports",
+  "sidebar.heading.files": "Files",
+  "sidebar.reports.empty": "No report skills available",
 } satisfies Partial<Record<Keys, string>>

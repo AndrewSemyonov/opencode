@@ -583,9 +583,7 @@ export default function Page() {
     const match = path.match(/^reports\/([^/]+)\.mdx?$/i)
     if (!match) return undefined
     const skillName = match[1]
-    if (expectedReportPath(skillName) !== path && `reports/${skillName}.md` !== path) {
-      // path didn't follow the expected convention exactly
-    }
+    if (expectedReportPath(skillName) !== path && `reports/${skillName}.md` !== path) return undefined
     const cmd = sync.data.command.find((c) => c.name === skillName && c.source === "skill")
     if (!cmd || !isReportSkill(cmd)) return undefined
     const skill = reportSkills().find((s) => s.name === skillName)
