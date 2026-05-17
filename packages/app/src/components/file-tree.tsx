@@ -8,7 +8,6 @@ import {
   createMemo,
   For,
   Match,
-  on,
   Show,
   splitProps,
   Switch,
@@ -198,6 +197,7 @@ export default function FileTree(props: {
   active?: string
   level?: number
   allowed?: readonly string[]
+  rootNames?: readonly string[]
   modified?: readonly string[]
   kinds?: ReadonlyMap<string, Kind>
   draggable?: boolean
@@ -313,20 +313,19 @@ export default function FileTree(props: {
     for (const dir of dirs) file.tree.expand(dir)
   })
 
-  createEffect(
-    on(
-      () => props.path,
-      (path) => {
-        const dir = untrack(() => file.tree.state(path))
-        if (!shouldListRoot({ level, dir })) return
-        void file.tree.list(path)
-      },
-      { defer: false },
-    ),
-  )
+  createEffect(() => {
+    const path = props.path
+    const dir = file.tree.state(path)
+    if (!shouldListRoot({ level, dir })) return
+    void file.tree.list(path)
+  })
 
   const nodes = createMemo(() => {
-    const nodes = file.tree.children(props.path)
+    let nodes = file.tree.children(props.path)
+    if (level === 0 && props.rootNames) {
+      const allow = new Set(props.rootNames)
+      nodes = nodes.filter((node) => allow.has(node.name))
+    }
     const current = filter()
     if (!current) return nodes
 

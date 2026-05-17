@@ -137,6 +137,7 @@ export interface MessageProps {
   actions?: UserActions
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
+  commandDisplayText?: (raw: string) => string | undefined
 }
 
 export type SessionAction = (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -797,7 +798,12 @@ export function Message(props: MessageProps) {
     <Switch>
       <Match when={props.message.role === "user" && props.message}>
         {(userMessage) => (
-          <UserMessageDisplay message={userMessage() as UserMessage} parts={props.parts} actions={props.actions} />
+          <UserMessageDisplay
+            message={userMessage() as UserMessage}
+            parts={props.parts}
+            actions={props.actions}
+            commandDisplayText={props.commandDisplayText}
+          />
         )}
       </Match>
       <Match when={props.message.role === "assistant" && props.message}>
@@ -988,7 +994,12 @@ function ContextToolGroup(props: { parts: ToolPart[]; busy?: boolean }) {
   )
 }
 
-export function UserMessageDisplay(props: { message: UserMessage; parts: PartType[]; actions?: UserActions }) {
+export function UserMessageDisplay(props: {
+  message: UserMessage
+  parts: PartType[]
+  actions?: UserActions
+  commandDisplayText?: (raw: string) => string | undefined
+}) {
   const data = useData()
   const dialog = useDialog()
   const i18n = useI18n()
@@ -1003,7 +1014,11 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
     () => props.parts?.find((p) => p.type === "text" && !(p as TextPart).synthetic) as TextPart | undefined,
   )
 
-  const text = createMemo(() => textPart()?.text || "")
+  const rawText = createMemo(() => textPart()?.text || "")
+  const text = createMemo(() => {
+    const raw = rawText()
+    return props.commandDisplayText?.(raw) ?? raw
+  })
 
   const files = createMemo(() => (props.parts?.filter((p) => p.type === "file") as FilePart[]) ?? [])
 

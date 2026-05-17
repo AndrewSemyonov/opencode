@@ -18,6 +18,18 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions, workspaceKey } from "./helpers"
+import FileTree from "@/components/file-tree"
+import { FileProvider } from "@/context/file"
+import { SDKProvider, useSDK } from "@/context/sdk"
+import { SyncProvider, useSync } from "@/context/sync"
+import { requestOpenFile } from "@/pages/session/pending-file-open"
+import {
+  expectedReportPath,
+  extractSessionIdFromReport,
+  findLatestReportFileForSkill,
+  reportSkillCommands,
+  type ReportSkillCommand,
+} from "@/pages/session/report-session-link"
 
 type InlineEditorComponent = (props: {
   id: string
@@ -47,6 +59,12 @@ export type WorkspaceSidebarContext = {
   isBusy: (directory: string) => boolean
   workspaceExpanded: (directory: string, local: boolean) => boolean
   setWorkspaceExpanded: (directory: string, value: boolean) => void
+  workspaceChatsExpanded: (directory: string) => boolean
+  setWorkspaceChatsExpanded: (directory: string, value: boolean) => void
+  workspaceReportsExpanded: (directory: string) => boolean
+  setWorkspaceReportsExpanded: (directory: string, value: boolean) => void
+  workspaceFilesExpanded: (directory: string) => boolean
+  setWorkspaceFilesExpanded: (directory: string, value: boolean) => void
   showResetWorkspaceDialog: (root: string, directory: string) => void
   showDeleteWorkspaceDialog: (root: string, directory: string) => void
   setScrollContainerRef: (el: HTMLDivElement | undefined, mobile?: boolean) => void
@@ -225,6 +243,161 @@ const WorkspaceActions = (props: {
     </Show>
   </div>
 )
+
+export const WorkspaceSubsection = (props: {
+  label: string
+  open: Accessor<boolean>
+  onOpenChange: (value: boolean) => void
+  children: JSX.Element
+}): JSX.Element => (
+  <Collapsible variant="ghost" open={props.open()} onOpenChange={props.onOpenChange}>
+    <Collapsible.Trigger class="flex items-center gap-1 w-full pt-2 pb-1 px-2 rounded-md hover:bg-surface-raised-base-hover">
+      <Icon name={props.open() ? "chevron-down" : "chevron-right"} size="small" />
+      <span class="text-12-medium text-text-weak uppercase tracking-wide">{props.label}</span>
+    </Collapsible.Trigger>
+    <Collapsible.Content>{props.children}</Collapsible.Content>
+  </Collapsible>
+)
+
+const FILES_ROOT_NAMES = ["reports"] as const
+
+const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
+  const sdk = useSDK()
+  const sync = useSync()
+  const navigate = useNavigate()
+  const params = useParams()
+  const language = useLanguage()
+  const slug = createMemo(() => base64Encode(props.directory))
+  const skills = createMemo<ReportSkillCommand[]>(() => reportSkillCommands(sync.data.command))
+
+  const open = async (skill: ReportSkillCommand) => {
+    let path: string | undefined
+    try {
+      const res = await sdk.client.file.list({ path: "reports" })
+      path = findLatestReportFileForSkill(res.data, skill.name)
+    } catch {
+      path = undefined
+    }
+    if (!path) path = expectedReportPath(skill.name)
+    requestOpenFile({ kind: "report", path })
+    if (params.dir === slug() && params.id) return
+    navigate(`/${slug()}/session`)
+  }
+
+  return (
+    <div class="px-2 pb-2 flex flex-col gap-0.5">
+      <Show
+        when={skills().length > 0}
+        fallback={
+          <div class="px-2 py-1.5 text-12-regular text-text-weak">
+            {language.t("sidebar.reports.empty")}
+          </div>
+        }
+      >
+        <For each={skills()}>
+          {(skill) => (
+            <button
+              type="button"
+              class="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left hover:bg-surface-raised-base-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong-base"
+              onClick={() => void open(skill)}
+            >
+              <Icon name="file-text" size="small" class="text-icon-weak shrink-0" />
+              <span class="text-13-regular text-text-base truncate">{skill.title ?? skill.name}</span>
+            </button>
+          )}
+        </For>
+      </Show>
+    </div>
+  )
+}
+
+export const WorkspaceReportSkillList = (props: { directory: string }): JSX.Element => {
+  const directory = createMemo(() => props.directory)
+  return (
+    <SDKProvider directory={directory}>
+      <SyncProvider>
+        <WorkspaceReportSkillListBody directory={props.directory} />
+      </SyncProvider>
+    </SDKProvider>
+  )
+}
+
+const WorkspaceFileTreeBody = (props: {
+  path: string
+  rootNames?: readonly string[]
+  kind: "file" | "report"
+  directory: string
+}): JSX.Element => {
+  const sdk = useSDK()
+  const sync = useSync()
+  const navigate = useNavigate()
+  const slug = createMemo(() => base64Encode(props.directory))
+
+  const openFromTree = async (filePath: string) => {
+    if (props.kind === "file") {
+      navigate(`/${slug()}/file/${encodeURIComponent(filePath)}`, { replace: true })
+      return
+    }
+    // kind === "report"
+    let sessionId: string | undefined
+    try {
+      const res = await sdk.client.file.read({ path: filePath })
+      const data = res.data
+      const text = data && data.type === "text" ? data.content : undefined
+      sessionId = extractSessionIdFromReport(filePath, text)
+    } catch {
+      sessionId = undefined
+    }
+    let target: string | undefined
+    if (sessionId) {
+      const inCache = sync.session.get(sessionId)
+      if (inCache) {
+        target = sessionId
+      } else {
+        try {
+          const probe = await sdk.client.session.get({ sessionID: sessionId })
+          if (probe.data) target = sessionId
+        } catch {
+          target = undefined
+        }
+      }
+    }
+    requestOpenFile({ kind: "report", path: filePath })
+    if (target) navigate(`/${slug()}/session/${target}`)
+    else navigate(`/${slug()}/session`)
+  }
+
+  return (
+    <div class="px-2 pb-2 group/filetree">
+      <FileTree path={props.path} rootNames={props.rootNames} onFileClick={(node) => void openFromTree(node.path)} />
+    </div>
+  )
+}
+
+export const WorkspaceFileTreeSection = (props: {
+  directory: string
+  path: string
+  rootNames?: readonly string[]
+  kind: "file" | "report"
+}): JSX.Element => {
+  const directory = createMemo(() => props.directory)
+  return (
+    <SDKProvider directory={directory}>
+      <SyncProvider>
+        <FileProvider>
+          <WorkspaceFileTreeBody
+            path={props.path}
+            rootNames={props.rootNames}
+            kind={props.kind}
+            directory={props.directory}
+          />
+        </FileProvider>
+      </SyncProvider>
+    </SDKProvider>
+  )
+}
+
+export { FILES_ROOT_NAMES }
 
 const WorkspaceSessionList = (props: {
   slug: Accessor<string>
@@ -414,20 +587,37 @@ export const SortableWorkspace = (props: {
         </div>
 
         <Collapsible.Content>
-          <div class="pt-2 pb-1 px-2 text-12-medium text-text-weak uppercase tracking-wide">
-            {language.t("sidebar.heading.chats")}
-          </div>
-          <WorkspaceSessionList
-            slug={slug}
-            mobile={props.mobile}
-            ctx={props.ctx}
-            showNew={showNew}
-            loading={loading}
-            sessions={sessions}
-            hasMore={hasMore}
-            loadMore={loadMore}
-            language={language}
-          />
+          <WorkspaceSubsection
+            label={language.t("sidebar.heading.chats")}
+            open={() => props.ctx.workspaceChatsExpanded(props.directory)}
+            onOpenChange={(v) => props.ctx.setWorkspaceChatsExpanded(props.directory, v)}
+          >
+            <WorkspaceSessionList
+              slug={slug}
+              mobile={props.mobile}
+              ctx={props.ctx}
+              showNew={showNew}
+              loading={loading}
+              sessions={sessions}
+              hasMore={hasMore}
+              loadMore={loadMore}
+              language={language}
+            />
+          </WorkspaceSubsection>
+          <WorkspaceSubsection
+            label={language.t("sidebar.heading.reports")}
+            open={() => props.ctx.workspaceReportsExpanded(props.directory)}
+            onOpenChange={(v) => props.ctx.setWorkspaceReportsExpanded(props.directory, v)}
+          >
+            <WorkspaceReportSkillList directory={props.directory} />
+          </WorkspaceSubsection>
+          <WorkspaceSubsection
+            label={language.t("sidebar.heading.files")}
+            open={() => props.ctx.workspaceFilesExpanded(props.directory)}
+            onOpenChange={(v) => props.ctx.setWorkspaceFilesExpanded(props.directory, v)}
+          >
+            <WorkspaceFileTreeSection directory={props.directory} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
+          </WorkspaceSubsection>
         </Collapsible.Content>
       </Collapsible>
     </div>
@@ -460,7 +650,7 @@ export const LocalWorkspace = (props: {
   return (
     <div
       ref={(el) => props.ctx.setScrollContainerRef(el, props.mobile)}
-      class="size-full flex flex-col py-2 overflow-y-auto no-scrollbar [overflow-anchor:none]"
+      class="flex flex-col [overflow-anchor:none]"
     >
       <WorkspaceSessionList
         slug={slug}

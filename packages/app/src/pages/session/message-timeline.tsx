@@ -29,6 +29,7 @@ import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { isReportSkill } from "@/pages/session/report-session-link"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
@@ -243,6 +244,34 @@ export function MessageTimeline(props: {
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
   const platform = usePlatform()
+
+  const commandDisplayText = (raw: string): string | undefined => {
+    const trimmed = raw.trim()
+    const commands = sync.data.command
+    if (!commands) return undefined
+    const slashMatch = trimmed.match(/^\/(\S+)(?:\s|$)/)
+    if (slashMatch) {
+      const token = slashMatch[1]
+      const cmd = commands.find((c) => c.source === "skill" && (c.name === token || c.aliases?.includes(token)))
+      if (cmd && isReportSkill(cmd)) {
+        const title = cmd.title ?? cmd.name
+        return language.t("session.report.userMessage", { title })
+      }
+    }
+    for (const cmd of commands) {
+      if (cmd.source !== "skill") continue
+      if (!isReportSkill(cmd)) continue
+      const template = cmd.template?.trim()
+      if (!template) continue
+      const firstLine = template.split(/\r?\n/, 1)[0]
+      if (!firstLine) continue
+      if (trimmed.startsWith(firstLine)) {
+        const title = cmd.title ?? cmd.name
+        return language.t("session.report.userMessage", { title })
+      }
+    }
+    return undefined
+  }
 
   const rendered = createMemo(() => props.renderedUserMessages.map((message) => message.id))
   const sessionID = createMemo(() => params.id)
@@ -1063,6 +1092,7 @@ export function MessageTimeline(props: {
                         showReasoningSummaries={settings.general.showReasoningSummaries()}
                         shellToolDefaultOpen={settings.general.shellToolPartsExpanded()}
                         editToolDefaultOpen={settings.general.editToolPartsExpanded()}
+                        commandDisplayText={commandDisplayText}
                         classes={{
                           root: "min-w-0 w-full relative",
                           content: "flex flex-col justify-between !overflow-visible",

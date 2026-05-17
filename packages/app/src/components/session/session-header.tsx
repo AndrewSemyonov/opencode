@@ -1,91 +1,34 @@
-import { Button } from "@opencode-ai/ui/button"
-import { Icon } from "@opencode-ai/ui/icon"
-import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
-import { createMemo, createSignal, For, onMount, Show } from "solid-js"
+import { createSignal, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
-import { useCommand } from "@/context/command"
-import { useLanguage } from "@/context/language"
-import { usePrompt } from "@/context/prompt"
-import { useSync } from "@/context/sync"
-import { useSessionLayout } from "@/pages/session/session-layout"
+import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
+import type { ReportSkillCommand } from "@/pages/session/report-session-link"
 
-export function SessionHeader() {
-  const command = useCommand()
-  const prompt = usePrompt()
-  const language = useLanguage()
-  const sync = useSync()
-  const { view } = useSessionLayout()
-  const skills = createMemo(() =>
-    sync.data.command
-      .filter((cmd) => cmd.source === "skill")
-      .map((cmd) => ({
-        name: cmd.name,
-        title: cmd.title ?? cmd.name,
-        aliases: cmd.aliases ?? [],
-        description: cmd.description,
-      }))
-      .toSorted((a, b) => a.title.localeCompare(b.title)),
-  )
+type SessionHeaderProps = {
+  skills: ReportSkillCommand[]
+  hasReport: boolean
+  generating: boolean
+  onGenerate: (skillName: string) => Promise<unknown> | void
+}
 
+export function SessionHeader(props: SessionHeaderProps) {
   const [rightMount, setRightMount] = createSignal<HTMLElement | null>(null)
   onMount(() => {
     setRightMount(document.getElementById("opencode-titlebar-right"))
   })
-
-  const select = (skill: { name: string; aliases: string[] }) => {
-    const text = `/${skill.aliases[0] ?? skill.name} `
-    const images = prompt.current().filter((part) => part.type === "image")
-    prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...images], text.length)
-    command.trigger("input.focus")
-  }
 
   return (
     <Show when={rightMount()}>
       {(mount) => (
         <Portal mount={mount()}>
           <div class="flex items-center gap-2">
-            <Show when={skills().length > 0}>
-              <div class="hidden md:flex items-center gap-0.5 max-w-[min(30vw,320px)] overflow-x-auto no-scrollbar px-1">
-                <For each={skills()}>
-                  {(skill) => (
-                    <Tooltip
-                      placement="bottom"
-                      inactive={!skill.description}
-                      value={<div class="max-w-72">{skill.description}</div>}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        class="h-6 w-32 px-1.5 text-11-regular text-text-base shrink-0"
-                        onClick={() => select(skill)}
-                        aria-label={`/${skill.aliases[0] ?? skill.name}`}
-                      >
-                        <span class="truncate">{skill.title}</span>
-                      </Button>
-                    </Tooltip>
-                  )}
-                </For>
-              </div>
+            <Show when={props.hasReport && props.skills.length > 0}>
+              <ReportGenerateButton
+                skills={props.skills}
+                onGenerate={props.onGenerate}
+                variant="header"
+                disabled={props.generating}
+              />
             </Show>
-            <div class="flex items-center gap-1">
-              <div class="hidden md:flex items-center gap-1 shrink-0">
-                <TooltipKeybind
-                  title={language.t("command.review.toggle")}
-                  keybind={command.keybind("review.toggle")}
-                >
-                  <Button
-                    variant="ghost"
-                    class="group/review-toggle titlebar-icon w-8 h-6 p-0 box-border"
-                    onClick={() => view().reviewPanel.toggle()}
-                    aria-label={language.t("command.review.toggle")}
-                    aria-expanded={view().reviewPanel.opened()}
-                    aria-controls="review-panel"
-                  >
-                    <Icon size="small" name={view().reviewPanel.opened() ? "review-active" : "review"} />
-                  </Button>
-                </TooltipKeybind>
-              </div>
-            </div>
           </div>
         </Portal>
       )}

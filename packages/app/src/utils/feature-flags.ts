@@ -1,4 +1,5 @@
 export const SHOW_MODEL_SELECTOR_STORAGE_KEY = "opencode.debug.showModelSelector"
+export const SHOW_PROMPT_INPUT_STORAGE_KEY = "opencode.debug.showPromptInput"
 
 export function readLocalStorageFlag(key: string, defaultValue = false) {
   if (typeof localStorage === "undefined") return defaultValue
@@ -17,3 +18,4 @@ export function readLocalStorageFlag(key: string, defaultValue = false) {
 }
 
 export const MODEL_SELECTOR_ENABLED = readLocalStorageFlag(SHOW_MODEL_SELECTOR_STORAGE_KEY)
+export const PROMPT_INPUT_ENABLED = readLocalStorageFlag(SHOW_PROMPT_INPUT_STORAGE_KEY)

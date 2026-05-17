@@ -8,6 +8,7 @@ import {
   Match,
   Switch,
   createMemo,
+  createSignal,
   createEffect,
   createComputed,
   on,
@@ -27,7 +28,7 @@ import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { showToast } from "@opencode-ai/ui/toast"
 import { checksum } from "@opencode-ai/shared/util/encode"
-import { useSearchParams } from "@solidjs/router"
+import { useNavigate, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { Logo } from "@opencode-ai/ui/logo"
 import { useComments } from "@/context/comments"
@@ -43,6 +44,18 @@ import { OpenLocalFileProvider } from "@opencode-ai/ui/context/file"
 import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
+import {
+  checkReportGenerated,
+  expectedReportPath,
+  findLatestReportPath,
+  isReportSkill,
+  reportSkillCommands,
+  reportSkillSignatures,
+} from "@/pages/session/report-session-link"
+import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
+import { requestOpenFile } from "@/pages/session/pending-file-open"
+import { base64Encode } from "@opencode-ai/shared/util/encode"
+import { Binary } from "@opencode-ai/shared/util/binary"
 import {
   createOpenReviewFile,
   createSessionTabs,
@@ -332,6 +345,7 @@ export default function Page() {
   const comments = useComments()
   const terminal = useTerminal()
   const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string }>()
+  const navigate = useNavigate()
   const { params, sessionKey, tabs, view } = useSessionLayout()
 
   createEffect(() => {
@@ -399,14 +413,6 @@ export default function Page() {
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const size = createSizing()
-  const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
-  const desktopFileTreeOpen = createMemo(() => false)
-  const desktopSidePanelOpen = createMemo(() => desktopReviewOpen())
-  const sessionPanelWidth = createMemo(() => {
-    if (!desktopReviewOpen()) return "100%"
-    return `${layout.session.width()}px`
-  })
-  const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
 
   function normalizeTab(tab: string) {
     if (!tab.startsWith("file://")) return tab
@@ -447,6 +453,15 @@ export default function Page() {
   const openedTabs = tabState.openedTabs
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
+  const sidePanelHasContent = createMemo(() => openedTabs().length > 0 || contextOpen())
+  const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened() && sidePanelHasContent())
+  const desktopFileTreeOpen = createMemo(() => false)
+  const desktopSidePanelOpen = createMemo(() => desktopReviewOpen())
+  const sessionPanelWidth = createMemo(() => {
+    if (!desktopReviewOpen()) return "100%"
+    return `${layout.session.width()}px`
+  })
+  const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
   const messages = createMemo(() => (params.id ? (sync.data.message[params.id] ?? []) : []))
   const messagesReady = createMemo(() => {
@@ -481,6 +496,117 @@ export default function Page() {
     },
   )
   const lastUserMessage = createMemo(() => visibleUserMessages().at(-1))
+
+  const reportSkills = createMemo(() => reportSkillCommands(sync.data.command))
+  const reportSignature = createMemo(() => reportSkillSignatures(sync.data.command))
+  const hasReport = createMemo(() => {
+    const id = params.id
+    if (!id) return false
+    return checkReportGenerated(sync.data.message[id], sync.data.part, reportSignature())
+  })
+  const latestReportPath = createMemo(() => {
+    const id = params.id
+    if (!id) return undefined
+    return findLatestReportPath(sync.data.message[id], sync.data.part, reportSignature())
+  })
+  createEffect(
+    on(latestReportPath, (path, prev) => {
+      if (!path) return
+      if (path === prev) return
+      requestOpenFile({ kind: "report", path })
+    }),
+  )
+  const [generatingReport, setGeneratingReport] = createSignal(false)
+  const generateReport = async (skillName: string) => {
+    if (generatingReport()) return
+    setGeneratingReport(true)
+    try {
+      const currentModel = local.model.current()
+      const currentAgent = local.agent.current()
+      if (!currentModel || !currentAgent) {
+        showToast({
+          title: language.t("prompt.toast.modelAgentRequired.title"),
+          description: language.t("prompt.toast.modelAgentRequired.description"),
+        })
+        return
+      }
+
+      let sessionID = params.id
+      const sessionDirectory = sdk.directory
+      if (!sessionID) {
+        const created = await sdk.client.session
+          .create()
+          .then((x) => x.data ?? undefined)
+          .catch((err) => {
+            fail(err)
+            return undefined
+          })
+        if (!created) return
+        const [, setStore] = globalSync.child(sessionDirectory)
+        setStore("session", (list) => {
+          const result = Binary.search(list, created.id, (item) => item.id)
+          const next = [...list]
+          if (result.found) next[result.index] = created
+          else next.splice(result.index, 0, created)
+          return next
+        })
+        local.session.promote(sessionDirectory, created.id)
+        layout.handoff.setTabs(base64Encode(sessionDirectory), created.id)
+        sessionID = created.id
+        navigate(`/${base64Encode(sessionDirectory)}/session/${created.id}`)
+      }
+
+      const text = `/${skillName}`
+      await sendFollowupDraft({
+        client: sdk.client,
+        sync,
+        globalSync,
+        draft: {
+          sessionID,
+          sessionDirectory,
+          prompt: [{ type: "text", content: text, start: 0, end: text.length }],
+          context: [],
+          agent: currentAgent.name,
+          model: { providerID: currentModel.provider.id, modelID: currentModel.id },
+          variant: local.model.variant.current(),
+        },
+        optimisticBusy: true,
+      })
+    } catch (err) {
+      fail(err)
+    } finally {
+      setGeneratingReport(false)
+    }
+  }
+
+  const renderMissingReportFallback = (path: string) => {
+    const match = path.match(/^reports\/([^/]+)\.mdx?$/i)
+    if (!match) return undefined
+    const skillName = match[1]
+    if (expectedReportPath(skillName) !== path && `reports/${skillName}.md` !== path) {
+      // path didn't follow the expected convention exactly
+    }
+    const cmd = sync.data.command.find((c) => c.name === skillName && c.source === "skill")
+    if (!cmd || !isReportSkill(cmd)) return undefined
+    const skill = reportSkills().find((s) => s.name === skillName)
+    if (!skill) return undefined
+    return (
+      <div class="flex flex-col items-center justify-center h-full gap-4 px-6 py-12 text-center">
+        <div class="text-text-base text-15-medium">{language.t("session.report.notGenerated")}</div>
+        <Show when={skill.description}>
+          <div class="text-text-weak text-13-regular max-w-md">{skill.description}</div>
+        </Show>
+        <div class="w-full max-w-sm">
+          <ReportGenerateButton
+            skills={[skill]}
+            onGenerate={generateReport}
+            variant="center"
+            disabled={generatingReport()}
+          />
+        </div>
+      </div>
+    )
+  }
 
   createEffect(() => {
     const tab = activeFileTab()
@@ -1831,7 +1957,12 @@ export default function Page() {
   return (
     <OpenLocalFileProvider value={openReviewFile}>
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
-      <SessionHeader />
+      <SessionHeader
+        skills={reportSkills()}
+        hasReport={hasReport()}
+        generating={generatingReport()}
+        onGenerate={generateReport}
+      />
       <div class="flex-1 min-h-0 flex flex-col md:flex-row">
         <Show when={!isDesktop() && !!params.id}>
           <Tabs value={store.mobileTab} class="h-auto">
@@ -1970,6 +2101,12 @@ export default function Page() {
                   }
                 : undefined
             }
+            report={{
+              skills: reportSkills(),
+              hasReport: hasReport(),
+              generating: generatingReport(),
+              onGenerate: generateReport,
+            }}
             setPromptDockRef={(el) => {
               promptDock = el
             }}
@@ -2003,6 +2140,7 @@ export default function Page() {
           focusReviewDiff={focusReviewDiff}
           reviewSnap={ui.reviewSnap}
           size={size}
+          renderMissingFallback={renderMissingReportFallback}
         />
       </div>
 
