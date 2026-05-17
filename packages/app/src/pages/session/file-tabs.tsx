@@ -202,7 +202,6 @@ export function FileTabContent(props: { tab: string }) {
   const contents = createMemo(() => state()?.content?.content ?? "")
   const cacheKey = createMemo(() => sampledChecksum(contents()))
   const md = createMemo(() => /\.(md|markdown|mdx)$/i.test(path() ?? ""))
-  const [raw, setRaw] = createSignal(false)
   const selectedLines = createMemo<SelectedLineRange | null>(() => {
     const p = path()
     if (!p) return null
@@ -346,7 +345,7 @@ export function FileTabContent(props: { tab: string }) {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (activeFileTab() !== props.tab) return
-      if (md() && !raw()) return
+      if (md()) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
       if (event.key.toLowerCase() !== "f") return
 
@@ -362,7 +361,6 @@ export function FileTabContent(props: { tab: string }) {
     on(
       path,
       () => {
-        setRaw(false)
         commentsUi.note.reset()
       },
       { defer: true },
@@ -458,7 +456,7 @@ export function FileTabContent(props: { tab: string }) {
   )
 
   const renderContent = (source: string) => {
-    if (md() && !raw()) return renderMarkdown(source)
+    if (md()) return renderMarkdown(source)
     return renderFile(source)
   }
 

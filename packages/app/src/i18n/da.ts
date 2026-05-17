@@ -21,7 +21,6 @@ export const dict = {
   "theme.scheme.light": "Lys",
   "theme.scheme.dark": "Mørk",
 
-  "command.sidebar.toggle": "Skift sidebjælke",
   "command.project.open": "Åbn projekt",
   "command.provider.connect": "Tilslut udbyder",
   "command.server.switch": "Skift server",
@@ -49,7 +48,6 @@ export const dict = {
   "command.context.addSelection.description": "Tilføj markerede linjer fra den aktuelle fil",
   "command.input.focus": "Fokuser inputfelt",
   "command.terminal.toggle": "Skift terminal",
-  "command.fileTree.toggle": "Skift filtræ",
   "command.review.toggle": "Skift gennemgang",
   "command.terminal.new": "Ny terminal",
   "command.terminal.new.description": "Opret en ny terminalfane",

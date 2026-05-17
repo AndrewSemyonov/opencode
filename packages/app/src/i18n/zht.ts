@@ -25,7 +25,6 @@ export const dict = {
   "theme.scheme.light": "淺色",
   "theme.scheme.dark": "深色",
 
-  "command.sidebar.toggle": "切換側邊欄",
   "command.project.open": "開啟專案",
   "command.provider.connect": "連接提供者",
   "command.server.switch": "切換伺服器",
@@ -53,7 +52,6 @@ export const dict = {
   "command.context.addSelection.description": "加入目前檔案中選取的行",
   "command.input.focus": "聚焦輸入框",
   "command.terminal.toggle": "切換終端機",
-  "command.fileTree.toggle": "切換檔案樹",
   "command.review.toggle": "切換審查",
   "command.terminal.new": "新增終端機",
   "command.terminal.new.description": "建立新的終端機標籤頁",

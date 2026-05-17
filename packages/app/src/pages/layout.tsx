@@ -1015,13 +1015,6 @@ export default function Layout(props: ParentProps) {
   command.register("layout", () => {
     const commands: CommandOption[] = [
       {
-        id: "sidebar.toggle",
-        title: language.t("command.sidebar.toggle"),
-        category: language.t("command.category.view"),
-        keybind: "mod+b",
-        onSelect: () => layout.sidebar.toggle(),
-      },
-      {
         id: "project.open",
         title: language.t("command.project.open"),
         category: language.t("command.category.project"),

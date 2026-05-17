@@ -25,7 +25,6 @@ export const dict = {
   "theme.scheme.light": "Açık",
   "theme.scheme.dark": "Koyu",
 
-  "command.sidebar.toggle": "Kenar çubuğunu aç/kapat",
   "command.project.open": "Proje aç",
   "command.provider.connect": "Sağlayıcı bağla",
   "command.server.switch": "Sunucu değiştir",
@@ -53,7 +52,6 @@ export const dict = {
   "command.context.addSelection.description": "Mevcut dosyadan seçili satırları ekle",
   "command.input.focus": "Girişi odakla",
   "command.terminal.toggle": "Terminali aç/kapat",
-  "command.fileTree.toggle": "Dosya ağacını aç/kapat",
   "command.review.toggle": "İncelemeyi aç/kapat",
   "command.terminal.new": "Yeni terminal",
   "command.terminal.new.description": "Yeni bir terminal sekmesi oluştur",

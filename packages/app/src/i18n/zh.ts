@@ -25,7 +25,6 @@ export const dict = {
   "theme.scheme.light": "浅色",
   "theme.scheme.dark": "深色",
 
-  "command.sidebar.toggle": "切换侧边栏",
 
   "command.project.open": "打开项目",
 
@@ -64,7 +63,6 @@ export const dict = {
 
   "command.terminal.toggle": "切换终端",
 
-  "command.fileTree.toggle": "切换文件树",
 
   "command.review.toggle": "切换审查",
 

@@ -21,7 +21,6 @@ export const dict = {
   "theme.scheme.light": "Claro",
   "theme.scheme.dark": "Oscuro",
 
-  "command.sidebar.toggle": "Alternar barra lateral",
   "command.project.open": "Abrir proyecto",
   "command.provider.connect": "Conectar proveedor",
   "command.server.switch": "Cambiar servidor",
@@ -49,7 +48,6 @@ export const dict = {
   "command.context.addSelection.description": "Añadir las líneas seleccionadas del archivo actual",
   "command.input.focus": "Enfocar entrada",
   "command.terminal.toggle": "Alternar terminal",
-  "command.fileTree.toggle": "Alternar árbol de archivos",
   "command.review.toggle": "Alternar revisión",
   "command.terminal.new": "Nueva terminal",
   "command.terminal.new.description": "Crear una nueva pestaña de terminal",
