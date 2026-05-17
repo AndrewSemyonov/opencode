@@ -1,28 +1,18 @@
 import {
   AssistantMessage,
-  type SnapshotFileDiff,
   Message as MessageType,
   Part as PartType,
 } from "@opencode-ai/sdk/v2/client"
 import type { SessionStatus } from "@opencode-ai/sdk/v2"
 import { useData } from "../context"
-import { useFileComponent } from "../context/file"
 
 import { Binary } from "@opencode-ai/shared/util/binary"
-import { getDirectory, getFilename } from "@opencode-ai/shared/util/path"
-import { createEffect, createMemo, createSignal, For, on, ParentProps, Show } from "solid-js"
-import { createStore } from "solid-js/store"
-import { Dynamic } from "solid-js/web"
+import { createMemo, ParentProps, Show } from "solid-js"
 import { AssistantParts, Message, MessageDivider, type UserActions } from "./message-part"
 import { Card } from "./card"
-import { Accordion } from "./accordion"
-import { StickyAccordionHeader } from "./sticky-accordion-header"
-import { DiffChanges } from "./diff-changes"
-import { Icon } from "./icon"
 import { SessionRetry } from "./session-retry"
 import { createAutoScroll } from "../hooks"
 import { useI18n } from "../context/i18n"
-import { normalize } from "./session-diff"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -110,12 +100,10 @@ export function SessionTurn(
 ) {
   const data = useData()
   const i18n = useI18n()
-  const fileComponent = useFileComponent()
 
   const emptyMessages: MessageType[] = []
   const emptyParts: PartType[] = []
   const emptyAssistant: AssistantMessage[] = []
-  const emptyDiffs: SnapshotFileDiff[] = []
   const idle = { type: "idle" as const }
 
   const allMessages = createMemo(() => props.messages ?? list(data.store.message?.[props.sessionID], emptyMessages))
@@ -177,35 +165,6 @@ export function SessionTurn(
   })
 
   const compaction = createMemo(() => parts().find((part) => part.type === "compaction"))
-
-  const diffs = createMemo(() => {
-    const files = message()?.summary?.diffs
-    if (!files?.length) return emptyDiffs
-
-    const seen = new Set<string>()
-    return files
-      .reduceRight<SnapshotFileDiff[]>((result, diff) => {
-        if (seen.has(diff.file)) return result
-        seen.add(diff.file)
-        result.push(diff)
-        return result
-      }, [])
-      .reverse()
-  })
-  const MAX_FILES = 10
-  const edited = createMemo(() => diffs().length)
-  const [state, setState] = createStore({
-    showAll: false,
-    expanded: [] as string[],
-  })
-  const showAll = () => state.showAll
-  const expanded = () => state.expanded
-  const overflow = createMemo(() => Math.max(0, edited() - MAX_FILES))
-  const visible = createMemo(() => (showAll() ? diffs() : diffs().slice(0, MAX_FILES)))
-  const toggleAll = () => {
-    autoScroll.pause()
-    setState("showAll", !showAll())
-  }
 
   const assistantMessages = createMemo(
     () => {

@@ -572,9 +572,8 @@ function index<T extends { id: string }>(items: readonly T[]) {
   return new Map(items.map((item) => [item.id, item] as const))
 }
 
-function renderable(part: PartType, _showReasoningSummaries = true) {
-  if (part.type === "text") return !!part.text?.trim()
-  return false
+function isVisibleText(part: PartType) {
+  return part.type === "text" && !!part.text?.trim()
 }
 
 function toolDefaultOpen(tool: string, shell = false, edit = false) {
@@ -612,7 +611,7 @@ export function AssistantParts(props: {
       groupParts(
         props.messages.flatMap((message) =>
           list(data.store.part?.[message.id], emptyParts)
-            .filter((part) => renderable(part, props.showReasoningSummaries ?? true))
+            .filter(isVisibleText)
             .map((part) => ({
               messageID: message.id,
               part,
@@ -832,7 +831,7 @@ export function AssistantMessageDisplay(props: {
     () =>
       groupParts(
         props.parts
-          .filter((part) => renderable(part, props.showReasoningSummaries ?? true))
+          .filter(isVisibleText)
           .map((part) => ({
             messageID: props.message.id,
             part,
