@@ -301,7 +301,7 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
               class="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left hover:bg-surface-raised-base-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-border-strong-base"
               onClick={() => void open(skill)}
             >
-              <Icon name="file-text" size="small" class="text-icon-weak shrink-0" />
+              <Icon name="open-file" size="small" class="text-icon-weak shrink-0" />
               <span class="text-13-regular text-text-base truncate">{skill.title ?? skill.name}</span>
             </button>
           )}
