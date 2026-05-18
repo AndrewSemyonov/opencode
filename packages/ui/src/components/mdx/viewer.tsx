@@ -1,4 +1,5 @@
-import { createMemo, type JSX, Show } from "solid-js"
+import { createMemo, ErrorBoundary, type JSX, Show } from "solid-js"
+import type { Root } from "mdast"
 import { parseMdx } from "./parse"
 import { createRenderContext, renderNode } from "./render"
 
@@ -9,8 +10,15 @@ export interface MdxViewerProps {
   onWarn?: (msg: string) => void
 }
 
+type MdxError = { type: "error"; message: string }
+type MdxResult = Root | MdxError | null
+
+function isMdxError(value: MdxResult): value is MdxError {
+  return !!value && (value as MdxError).type === "error"
+}
+
 export function MdxViewer(props: MdxViewerProps): JSX.Element {
-  const tree = createMemo(() => {
+  const tree = createMemo<MdxResult>(() => {
     if (!props.text) return null
     try {
       return parseMdx(props.text)
@@ -33,17 +41,31 @@ export function MdxViewer(props: MdxViewerProps): JSX.Element {
         margin: "0 auto",
       }}
     >
-      <Show
-        when={tree() && (tree() as any).type !== "error"}
-        fallback={
-          <Show when={tree()}>
-            <div style={{ padding: "16px", color: "var(--text-negative, #b91c1c)" }}>
-              Failed to parse MDX: {(tree() as any).message}
-            </div>
+      <Show when={tree()}>
+        {(t) => (
+          <Show
+            when={!isMdxError(t())}
+            fallback={
+              <div style={{ padding: "16px", color: "var(--text-negative, #b91c1c)" }}>
+                Failed to parse MDX: {(t() as MdxError).message}
+              </div>
+            }
+          >
+            <ErrorBoundary
+              fallback={(err) => {
+                const message = err instanceof Error ? err.message : String(err)
+                props.onWarn?.(`Render failed: ${message}`)
+                return (
+                  <div style={{ padding: "16px", color: "var(--text-negative, #b91c1c)" }}>
+                    Failed to render MDX: {message}
+                  </div>
+                )
+              }}
+            >
+              {renderNode(t() as Root, ctx)}
+            </ErrorBoundary>
           </Show>
-        }
-      >
-        {renderNode(tree() as any, ctx)}
+        )}
       </Show>
     </div>
   )

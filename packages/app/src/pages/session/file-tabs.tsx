@@ -406,14 +406,13 @@ export function FileTabContent(props: { tab: string }) {
     scrollSync.queueRestore()
   })
 
+  const renderMdx = (source: string) => (
+    <div class="relative overflow-hidden pb-40">
+      <MdxViewer text={source} path={path() ?? undefined} />
+    </div>
+  )
+
   const renderFile = (source: string) => {
-    if (isMdxPath(path())) {
-      return (
-        <div class="relative overflow-hidden pb-40">
-          <MdxViewer text={source} path={path() ?? undefined} />
-        </div>
-      )
-    }
     return (
       <div class="relative overflow-hidden pb-40">
       <Dynamic
@@ -468,6 +467,7 @@ export function FileTabContent(props: { tab: string }) {
   )
 
   const renderContent = (source: string) => {
+    if (isMdxPath(path())) return raw() ? renderFile(source) : renderMdx(source)
     if (md() && !raw()) return renderMarkdown(source)
     return renderFile(source)
   }

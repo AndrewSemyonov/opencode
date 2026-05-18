@@ -9,18 +9,37 @@ interface RenderContext {
   onWarn: (msg: string) => void
 }
 
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);?/gi, (_, h) => {
+      const code = parseInt(h, 16)
+      return Number.isFinite(code) ? String.fromCodePoint(code) : ""
+    })
+    .replace(/&#(\d+);?/g, (_, d) => {
+      const code = parseInt(d, 10)
+      return Number.isFinite(code) ? String.fromCodePoint(code) : ""
+    })
+}
+
 function sanitizeUrl(url: string | undefined | null, ctx: RenderContext): string | undefined {
   if (!url) return undefined
-  const trimmed = String(url).trim()
-  if (/^javascript:/i.test(trimmed)) {
-    ctx.onWarn(`Blocked javascript: URL "${trimmed}"`)
-    return undefined
+  // Browsers decode HTML entities and ignore control characters when resolving
+  // href/src, so we must apply the same normalization *before* matching the
+  // scheme — otherwise `java&#x0A;script:` slips through and runs as JS.
+  const normalized = decodeHtmlEntities(String(url))
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .trim()
+  const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(normalized)
+  if (!schemeMatch) return normalized
+  const scheme = schemeMatch[1].toLowerCase()
+  if (scheme === "http" || scheme === "https" || scheme === "mailto" || scheme === "tel") {
+    return normalized
   }
-  if (/^data:/i.test(trimmed) && !/^data:image\//i.test(trimmed)) {
-    ctx.onWarn(`Blocked data URL "${trimmed.slice(0, 40)}…"`)
-    return undefined
+  if (scheme === "data" && /^data:image\//i.test(normalized)) {
+    return normalized
   }
-  return trimmed
+  ctx.onWarn(`Blocked URL with scheme "${scheme}": ${normalized.slice(0, 60)}…`)
+  return undefined
 }
 
 function renderChildren(children: Node[] | undefined, ctx: RenderContext): JSX.Element {
