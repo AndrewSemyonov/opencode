@@ -37,8 +37,6 @@ export const dict = {
 
   "command.palette": "命令面板",
 
-  "command.theme.cycle": "循環主題",
-  "command.theme.set": "使用主題: {{theme}}",
   "command.theme.scheme.cycle": "循環配色方案",
   "command.theme.scheme.set": "使用配色方案: {{scheme}}",
 
@@ -400,7 +398,6 @@ export const dict = {
   "toast.language.title": "語言",
   "toast.language.description": "已切換到 {{language}}",
 
-  "toast.theme.title": "主題已切換",
   "toast.scheme.title": "顏色方案",
 
   "toast.workspace.enabled.title": "工作區已啟用",
@@ -616,8 +613,6 @@ export const dict = {
   "settings.general.row.appearance.description": "自訂 OpenCode 在你的裝置上的外觀",
   "settings.general.row.colorScheme.title": "配色方案",
   "settings.general.row.colorScheme.description": "選擇 OpenCode 要跟隨系統、淺色或深色主題",
-  "settings.general.row.theme.title": "主題",
-  "settings.general.row.theme.description": "自訂 OpenCode 的主題。",
   "settings.general.row.font.title": "程式碼字型",
   "settings.general.row.font.description": "自訂程式碼區塊和終端機使用的字型",
   "settings.general.row.uiFont.title": "介面字型",
