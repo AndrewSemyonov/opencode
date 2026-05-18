@@ -33,8 +33,6 @@ export const dict = {
 
   "command.palette": "Paleta de comandos",
 
-  "command.theme.cycle": "Alternar tema",
-  "command.theme.set": "Usar tema: {{theme}}",
   "command.theme.scheme.cycle": "Alternar esquema de color",
   "command.theme.scheme.set": "Usar esquema de color: {{scheme}}",
 
@@ -403,7 +401,6 @@ export const dict = {
   "toast.language.title": "Idioma",
   "toast.language.description": "Cambiado a {{language}}",
 
-  "toast.theme.title": "Tema cambiado",
   "toast.scheme.title": "Esquema de color",
 
   "toast.workspace.enabled.title": "Espacios de trabajo habilitados",
@@ -630,8 +627,6 @@ export const dict = {
   "settings.general.row.appearance.description": "Personaliza cómo se ve OpenCode en tu dispositivo",
   "settings.general.row.colorScheme.title": "Esquema de color",
   "settings.general.row.colorScheme.description": "Elige si OpenCode sigue el tema del sistema, claro u oscuro",
-  "settings.general.row.theme.title": "Tema",
-  "settings.general.row.theme.description": "Personaliza el tema de OpenCode.",
   "settings.general.row.font.title": "Fuente de código",
   "settings.general.row.font.description": "Personaliza la fuente usada en bloques de código y terminales",
   "settings.general.row.uiFont.title": "Fuente de la interfaz",
