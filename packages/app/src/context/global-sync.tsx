@@ -72,14 +72,12 @@ function createGlobalSync() {
   let projectWritten = false
   let bootedAt = 0
   let bootingRoot = false
-  let eventFrame: number | undefined
   let eventTimer: ReturnType<typeof setTimeout> | undefined
 
   onCleanup(() => {
     active = false
   })
   onCleanup(() => {
-    if (eventFrame !== undefined) cancelAnimationFrame(eventFrame)
     if (eventTimer !== undefined) clearTimeout(eventTimer)
   })
 
@@ -354,20 +352,10 @@ function createGlobalSync() {
   }
 
   onMount(() => {
-    if (typeof requestAnimationFrame === "function") {
-      eventFrame = requestAnimationFrame(() => {
-        eventFrame = undefined
-        eventTimer = setTimeout(() => {
-          eventTimer = undefined
-          globalSDK.event.start()
-        }, 0)
-      })
-    } else {
-      eventTimer = setTimeout(() => {
-        eventTimer = undefined
-        globalSDK.event.start()
-      }, 0)
-    }
+    eventTimer = setTimeout(() => {
+      eventTimer = undefined
+      globalSDK.event.start()
+    }, 0)
     void bootstrap()
   })
 

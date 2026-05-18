@@ -1,19 +1,19 @@
-export const SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY = "opencode.debug.showPromptInputTray"
+export const SHOW_MODEL_SELECTOR_STORAGE_KEY = "opencode.debug.showModelSelector"
 
-export function readLocalStorageFlag(key: string) {
-  if (typeof localStorage === "undefined") return false
+export function readLocalStorageFlag(key: string, defaultValue = false) {
+  if (typeof localStorage === "undefined") return defaultValue
 
   try {
     const raw = localStorage.getItem(key)
-    if (!raw) return false
+    if (raw === null) return defaultValue
 
     const normalized = raw.trim().toLowerCase()
-    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on"
+    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false
+    return defaultValue
   } catch {
-    return false
+    return defaultValue
   }
 }
 
-export function isPromptInputTrayEnabled() {
-  return readLocalStorageFlag(SHOW_PROMPT_INPUT_TRAY_STORAGE_KEY)
-}
+export const MODEL_SELECTOR_ENABLED = readLocalStorageFlag(SHOW_MODEL_SELECTOR_STORAGE_KEY)

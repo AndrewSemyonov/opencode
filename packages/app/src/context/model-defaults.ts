@@ -15,6 +15,11 @@ export const PREFERRED_DEFAULT_MODEL = {
   modelID: "google/gemini-3-flash-preview",
 } as const satisfies ModelKey
 
+export const HARDCODED_ACTIVE_MODEL: ModelKey | undefined = {
+  providerID: "openrouter",
+  modelID: "google/gemini-2.5-flash",
+}
+
 export function formatActiveModelLabel(model: ActiveModelLabel) {
   return `${model.provider.id} / ${model.name}`
 }
