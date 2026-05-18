@@ -34,8 +34,6 @@ export const dict = {
 
   "command.palette": "Палитра команд",
 
-  "command.theme.cycle": "Цикл тем",
-  "command.theme.set": "Использовать тему: {{theme}}",
   "command.theme.scheme.cycle": "Цикл цветовой схемы",
   "command.theme.scheme.set": "Использовать цветовую схему: {{scheme}}",
 
@@ -405,7 +403,6 @@ export const dict = {
   "toast.language.title": "Язык",
   "toast.language.description": "Переключено на {{language}}",
 
-  "toast.theme.title": "Тема переключена",
   "toast.scheme.title": "Цветовая схема",
 
   "toast.permissions.autoaccept.on.title": "Разрешения принимаются автоматически",
@@ -636,8 +633,6 @@ export const dict = {
   "settings.general.row.appearance.description": "Настройте как ИИ аналитика предприятий питания. На базе GigaChat выглядит на вашем устройстве",
   "settings.general.row.colorScheme.title": "Цветовая схема",
   "settings.general.row.colorScheme.description": "Выберите, следует ли ИИ аналитика предприятий питания. На базе GigaChat системной, светлой или тёмной теме",
-  "settings.general.row.theme.title": "Тема",
-  "settings.general.row.theme.description": "Настройте оформление ИИ аналитика предприятий питания. На базе GigaChat.",
   "settings.general.row.font.title": "Шрифт кода",
   "settings.general.row.font.description": "Настройте шрифт, используемый в блоках кода и терминалах",
   "settings.general.row.uiFont.title": "Шрифт интерфейса",

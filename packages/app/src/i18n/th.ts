@@ -34,8 +34,6 @@ export const dict = {
 
   "command.palette": "คำสั่งค้นหา",
 
-  "command.theme.cycle": "เปลี่ยนธีม",
-  "command.theme.set": "ใช้ธีม: {{theme}}",
   "command.theme.scheme.cycle": "เปลี่ยนโทนสี",
   "command.theme.scheme.set": "ใช้โทนสี: {{scheme}}",
 
@@ -403,7 +401,6 @@ export const dict = {
   "toast.language.title": "ภาษา",
   "toast.language.description": "สลับไปที่ {{language}}",
 
-  "toast.theme.title": "สลับธีมแล้ว",
   "toast.scheme.title": "โทนสี",
 
   "toast.workspace.enabled.title": "เปิดใช้งานพื้นที่ทำงานแล้ว",
@@ -623,8 +620,6 @@ export const dict = {
   "settings.general.row.appearance.description": "ปรับแต่งวิธีการที่ OpenCode มีลักษณะบนอุปกรณ์ของคุณ",
   "settings.general.row.colorScheme.title": "โทนสี",
   "settings.general.row.colorScheme.description": "เลือกว่าจะให้ OpenCode ใช้ธีมตามระบบ สว่าง หรือมืด",
-  "settings.general.row.theme.title": "ธีม",
-  "settings.general.row.theme.description": "ปรับแต่งวิธีการที่ OpenCode มีธีม",
   "settings.general.row.font.title": "ฟอนต์โค้ด",
   "settings.general.row.font.description": "ปรับแต่งฟอนต์ที่ใช้ในบล็อกโค้ดและเทอร์มินัล",
   "settings.general.row.uiFont.title": "ฟอนต์ UI",
