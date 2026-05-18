@@ -261,6 +261,31 @@ export const WorkspaceSubsection = (props: {
 
 const FILES_ROOT_NAMES = ["data-sources", "data", "datasets", "sources", "reports"] as const
 
+async function resolveReportSessionId(
+  sdk: ReturnType<typeof useSDK>,
+  sync: ReturnType<typeof useSync>,
+  filePath: string,
+): Promise<string | undefined> {
+  let sessionId: string | undefined
+  try {
+    const res = await sdk.client.file.read({ path: filePath })
+    const data = res.data
+    const text = data && data.type === "text" ? data.content : undefined
+    sessionId = extractSessionIdFromReport(filePath, text)
+  } catch {
+    sessionId = undefined
+  }
+  if (!sessionId) return undefined
+  if (sync.session.get(sessionId)) return sessionId
+  try {
+    const probe = await sdk.client.session.get({ sessionID: sessionId })
+    if (probe.data) return sessionId
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
   const sync = useSync()
@@ -280,6 +305,11 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     }
     if (!path) path = expectedReportPath(skill.name)
     requestOpenFile({ kind: "report", path })
+    const target = await resolveReportSessionId(sdk, sync, path)
+    if (target) {
+      navigate(`/${slug()}/session/${target}`)
+      return
+    }
     if (params.dir === slug() && params.id) return
     navigate(`/${slug()}/session`)
   }
@@ -339,29 +369,7 @@ const WorkspaceFileTreeBody = (props: {
       return
     }
     // kind === "report"
-    let sessionId: string | undefined
-    try {
-      const res = await sdk.client.file.read({ path: filePath })
-      const data = res.data
-      const text = data && data.type === "text" ? data.content : undefined
-      sessionId = extractSessionIdFromReport(filePath, text)
-    } catch {
-      sessionId = undefined
-    }
-    let target: string | undefined
-    if (sessionId) {
-      const inCache = sync.session.get(sessionId)
-      if (inCache) {
-        target = sessionId
-      } else {
-        try {
-          const probe = await sdk.client.session.get({ sessionID: sessionId })
-          if (probe.data) target = sessionId
-        } catch {
-          target = undefined
-        }
-      }
-    }
+    const target = await resolveReportSessionId(sdk, sync, filePath)
     requestOpenFile({ kind: "report", path: filePath })
     if (target) navigate(`/${slug()}/session/${target}`)
     else navigate(`/${slug()}/session`)

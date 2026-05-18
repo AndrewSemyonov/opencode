@@ -1,4 +1,4 @@
-import { createSignal, onMount, Show } from "solid-js"
+import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
 import type { ReportSkillCommand } from "@/pages/session/report-session-link"
@@ -13,7 +13,17 @@ type SessionHeaderProps = {
 export function SessionHeader(props: SessionHeaderProps) {
   const [rightMount, setRightMount] = createSignal<HTMLElement | null>(null)
   onMount(() => {
-    setRightMount(document.getElementById("opencode-titlebar-right"))
+    let raf = 0
+    const tick = () => {
+      const el = document.getElementById("opencode-titlebar-right")
+      if (el) {
+        setRightMount(el)
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    tick()
+    onCleanup(() => cancelAnimationFrame(raf))
   })
 
   return (

@@ -17,11 +17,17 @@ function isMdxError(value: MdxResult): value is MdxError {
   return !!value && (value as MdxError).type === "error"
 }
 
+const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/
+
+function stripFrontmatter(source: string): string {
+  return source.replace(FRONTMATTER_RE, "")
+}
+
 export function MdxViewer(props: MdxViewerProps): JSX.Element {
   const tree = createMemo<MdxResult>(() => {
     if (!props.text) return null
     try {
-      return parseMdx(props.text)
+      return parseMdx(stripFrontmatter(props.text))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return { type: "error", message }
