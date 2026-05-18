@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -173,7 +173,10 @@ function createScrollSync(input: { tab: () => string; view: ReturnType<typeof us
   }
 }
 
-export function FileTabContent(props: { tab: string }) {
+export function FileTabContent(props: {
+  tab: string
+  renderMissingFallback?: (path: string) => JSX.Element | undefined | null
+}) {
   const file = useFile()
   const comments = useComments()
   const language = useLanguage()
@@ -478,6 +481,20 @@ export function FileTabContent(props: { tab: string }) {
         onScroll={scrollSync.handleScroll as any}
       >
         <Switch>
+          <Match
+            when={(() => {
+              const s = state()
+              if (!s) return undefined
+              if (s.loading) return undefined
+              const p = path()
+              if (!p) return undefined
+              const isEmpty = s.loaded && !contents()
+              if (!s.error && !isEmpty) return undefined
+              return props.renderMissingFallback?.(p) ?? undefined
+            })()}
+          >
+            {(fallback) => fallback()}
+          </Match>
           <Match when={state()?.loaded}>{renderContent(contents())}</Match>
           <Match when={state()?.loading}>
             <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>

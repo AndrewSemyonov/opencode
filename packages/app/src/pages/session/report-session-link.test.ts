@@ -1,0 +1,294 @@
+import { describe, expect, it } from "bun:test"
+import type { Command, Message, Part } from "@opencode-ai/sdk/v2/client"
+import {
+  checkReportGenerated,
+  extractReportPathFromText,
+  extractSessionIdFromReport,
+  findLatestReportPath,
+  isReportSkill,
+  reportSkillAliases,
+  reportSkillCommands,
+} from "./report-session-link"
+
+describe("extractSessionIdFromReport", () => {
+  it("reads sessionId from md frontmatter", () => {
+    const content = "---\ntitle: Weekly\nsessionId: ses_abc123\n---\n# Hello"
+    expect(extractSessionIdFromReport("reports/x.md", content)).toBe("ses_abc123")
+  })
+
+  it("reads sessionId from mdx frontmatter", () => {
+    const content = "---\nsessionId: ses_mdx\n---\n<MDX />"
+    expect(extractSessionIdFromReport("reports/x.mdx", content)).toBe("ses_mdx")
+  })
+
+  it("supports quoted sessionId", () => {
+    const dq = '---\nsessionId: "ses_quoted"\n---'
+    const sq = "---\nsessionId: 'ses_sq'\n---"
+    expect(extractSessionIdFromReport("a.md", dq)).toBe("ses_quoted")
+    expect(extractSessionIdFromReport("a.md", sq)).toBe("ses_sq")
+  })
+
+  it("supports CRLF frontmatter", () => {
+    const content = "---\r\nsessionId: ses_crlf\r\n---\r\nbody"
+    expect(extractSessionIdFromReport("a.md", content)).toBe("ses_crlf")
+  })
+
+  it("reads sessionId from json top-level", () => {
+    const content = JSON.stringify({ sessionId: "ses_json", other: 1 })
+    expect(extractSessionIdFromReport("reports/x.json", content)).toBe("ses_json")
+  })
+
+  it("returns undefined when frontmatter is missing", () => {
+    expect(extractSessionIdFromReport("a.md", "# no frontmatter here")).toBeUndefined()
+  })
+
+  it("returns undefined when sessionId field is missing", () => {
+    expect(extractSessionIdFromReport("a.md", "---\ntitle: x\n---\nbody")).toBeUndefined()
+  })
+
+  it("returns undefined for malformed json", () => {
+    expect(extractSessionIdFromReport("a.json", "{not json")).toBeUndefined()
+  })
+
+  it("returns undefined for json without sessionId", () => {
+    expect(extractSessionIdFromReport("a.json", JSON.stringify({ other: 1 }))).toBeUndefined()
+  })
+
+  it("returns undefined for unsupported extensions", () => {
+    expect(extractSessionIdFromReport("a.txt", "---\nsessionId: x\n---")).toBeUndefined()
+    expect(extractSessionIdFromReport("a.png", "anything")).toBeUndefined()
+  })
+
+  it("returns undefined for null/empty content (binary)", () => {
+    expect(extractSessionIdFromReport("a.md", null)).toBeUndefined()
+    expect(extractSessionIdFromReport("a.md", undefined)).toBeUndefined()
+    expect(extractSessionIdFromReport("a.md", "")).toBeUndefined()
+  })
+
+  it("returns undefined when sessionId value is empty", () => {
+    expect(extractSessionIdFromReport("a.md", "---\nsessionId:   \n---")).toBeUndefined()
+    expect(extractSessionIdFromReport("a.json", JSON.stringify({ sessionId: "" }))).toBeUndefined()
+  })
+})
+
+const cmd = (input: Partial<Command> & Pick<Command, "name">): Command => ({
+  template: "",
+  hints: [],
+  ...input,
+})
+
+describe("isReportSkill", () => {
+  it("matches by name", () => {
+    expect(isReportSkill({ name: "report" })).toBe(true)
+  })
+
+  it("matches by title in Russian", () => {
+    expect(isReportSkill({ name: "x", title: "Отчёт" })).toBe(true)
+    expect(isReportSkill({ name: "x", title: "Отчет" })).toBe(true)
+  })
+
+  it("matches by alias", () => {
+    expect(isReportSkill({ name: "x", aliases: ["отчет"] })).toBe(true)
+  })
+
+  it("does not match unrelated names", () => {
+    expect(isReportSkill({ name: "help" })).toBe(false)
+    expect(isReportSkill({ name: "summary", aliases: ["sum"] })).toBe(false)
+  })
+})
+
+describe("reportSkillCommands", () => {
+  it("filters by source=skill and report-matching name", () => {
+    const out = reportSkillCommands([
+      cmd({ name: "report", title: "Отчёт", source: "skill" }),
+      cmd({ name: "report", title: "Other", source: "command" }),
+      cmd({ name: "help", source: "skill" }),
+    ])
+    expect(out.map((s) => s.name)).toEqual(["report"])
+  })
+
+  it("sorts by title", () => {
+    const out = reportSkillCommands([
+      cmd({ name: "zreport", title: "Z report", source: "skill" }),
+      cmd({ name: "areport", title: "A report", source: "skill" }),
+    ])
+    expect(out.map((s) => s.name)).toEqual(["areport", "zreport"])
+  })
+
+  it("returns empty array for null/undefined", () => {
+    expect(reportSkillCommands(undefined)).toEqual([])
+    expect(reportSkillCommands(null)).toEqual([])
+    expect(reportSkillCommands([])).toEqual([])
+  })
+})
+
+describe("reportSkillAliases", () => {
+  it("includes name and aliases, deduplicated", () => {
+    const out = reportSkillAliases([
+      cmd({ name: "report", aliases: ["отчёт", "отчет"], source: "skill" }),
+      cmd({ name: "report", aliases: ["отчёт"], source: "skill" }),
+    ])
+    expect(out).toEqual(["report", "отчёт", "отчет"])
+  })
+
+  it("returns empty when no report skills", () => {
+    expect(reportSkillAliases([cmd({ name: "help", source: "skill" })])).toEqual([])
+  })
+})
+
+const textPart = (id: string, messageID: string, text: string): Part => ({
+  id,
+  sessionID: "s",
+  messageID,
+  type: "text",
+  text,
+})
+
+const userMessage = (id: string): Message => ({
+  id,
+  sessionID: "s",
+  role: "user",
+  time: { created: 1 },
+  agent: "a",
+  model: { providerID: "p", modelID: "m" },
+})
+
+const assistantMessage = (id: string, completed?: number): Message => ({
+  id,
+  sessionID: "s",
+  role: "assistant",
+  time: { created: 2, completed },
+  parentID: "p",
+  modelID: "m",
+  providerID: "p",
+  mode: "default",
+  agent: "a",
+  path: { cwd: "/", root: "/" },
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+})
+
+describe("checkReportGenerated", () => {
+  it("returns false with no messages", () => {
+    expect(checkReportGenerated([], {}, ["report"])).toBe(false)
+    expect(checkReportGenerated(undefined, undefined, ["report"])).toBe(false)
+  })
+
+  it("returns false with no aliases", () => {
+    expect(checkReportGenerated([userMessage("u1")], {}, [])).toBe(false)
+  })
+
+  it("returns true when user /report has a completed assistant follow-up", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = { u1: [textPart("p1", "u1", "/report")] }
+    expect(checkReportGenerated(messages, parts, ["report"])).toBe(true)
+  })
+
+  it("returns false when assistant follow-up is still running", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1")]
+    const parts = { u1: [textPart("p1", "u1", "/report do stuff")] }
+    expect(checkReportGenerated(messages, parts, ["report"])).toBe(false)
+  })
+
+  it("matches by alias when user used /отчёт", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = { u1: [textPart("p1", "u1", "/отчёт")] }
+    expect(checkReportGenerated(messages, parts, ["report", "отчёт"])).toBe(true)
+  })
+
+  it("ignores non-command user messages", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = { u1: [textPart("p1", "u1", "hello")] }
+    expect(checkReportGenerated(messages, parts, ["report"])).toBe(false)
+  })
+
+  it("requires whole-word match (does not match /reporting)", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = { u1: [textPart("p1", "u1", "/reporting")] }
+    expect(checkReportGenerated(messages, parts, ["report"])).toBe(false)
+  })
+
+  it("skips synthetic text parts", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = {
+      u1: [
+        { ...textPart("p1", "u1", "/report"), synthetic: true } as Part,
+        textPart("p2", "u1", "no command"),
+      ],
+    }
+    expect(checkReportGenerated(messages, parts, ["report"])).toBe(false)
+  })
+})
+
+describe("extractReportPathFromText", () => {
+  it("finds a report path in plain text", () => {
+    expect(extractReportPathFromText("Saved to reports/report-2026-05-16-21:15.md.")).toBe(
+      "reports/report-2026-05-16-21:15.md",
+    )
+  })
+
+  it("finds the path inside markdown code fence", () => {
+    expect(extractReportPathFromText("Готово, см. `reports/report-2026-05-17-10:00.md`.")).toBe(
+      "reports/report-2026-05-17-10:00.md",
+    )
+  })
+
+  it("handles backslash-free dot prefix", () => {
+    expect(extractReportPathFromText("file at ./reports/report-x.md created")).toBe("reports/report-x.md")
+  })
+
+  it("returns undefined for unrelated text", () => {
+    expect(extractReportPathFromText("nothing here")).toBeUndefined()
+    expect(extractReportPathFromText("")).toBeUndefined()
+  })
+
+  it("does not match if 'reports' is part of another word", () => {
+    expect(extractReportPathFromText("/reports/report.md")).toBe("reports/report.md")
+    expect(extractReportPathFromText("ai-reports/report-x.md")).toBeUndefined()
+  })
+})
+
+describe("findLatestReportPath", () => {
+  it("returns the path from the last completed assistant turn following /report", () => {
+    const messages: Message[] = [
+      userMessage("u1"),
+      assistantMessage("a1", 50),
+      userMessage("u2"),
+      assistantMessage("a2", 100),
+    ]
+    const parts = {
+      u1: [textPart("p1", "u1", "hello")],
+      a1: [textPart("p2", "a1", "hi")],
+      u2: [textPart("p3", "u2", "/report")],
+      a2: [textPart("p4", "a2", "Отчёт: reports/report-2026-05-17-10:30.md")],
+    }
+    expect(findLatestReportPath(messages, parts, ["report"])).toBe("reports/report-2026-05-17-10:30.md")
+  })
+
+  it("returns undefined when assistant turn is not completed", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1")]
+    const parts = {
+      u1: [textPart("p1", "u1", "/report")],
+      a1: [textPart("p2", "a1", "reports/report.md")],
+    }
+    expect(findLatestReportPath(messages, parts, ["report"])).toBeUndefined()
+  })
+
+  it("returns undefined when last assistant turn was not for /report", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = {
+      u1: [textPart("p1", "u1", "plain question")],
+      a1: [textPart("p2", "a1", "answer with reports/report-x.md mention")],
+    }
+    expect(findLatestReportPath(messages, parts, ["report"])).toBeUndefined()
+  })
+
+  it("returns undefined when assistant text has no path", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = {
+      u1: [textPart("p1", "u1", "/report")],
+      a1: [textPart("p2", "a1", "no path here")],
+    }
+    expect(findLatestReportPath(messages, parts, ["report"])).toBeUndefined()
+  })
+})
