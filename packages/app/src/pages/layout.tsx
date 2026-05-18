@@ -80,9 +80,13 @@ import {
 } from "./layout/deep-links"
 import { createInlineEditorController } from "./layout/inline-editor"
 import {
+  FILES_ROOT_NAMES,
   LocalWorkspace,
   SortableWorkspace,
   WorkspaceDragOverlay,
+  WorkspaceFileTreeSection,
+  WorkspaceReportSkillList,
+  WorkspaceSubsection,
   type WorkspaceSidebarContext,
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
@@ -102,6 +106,9 @@ export default function Layout(props: ParentProps) {
       workspaceName: {} as Record<string, string>,
       workspaceBranchName: {} as Record<string, Record<string, string>>,
       workspaceExpanded: {} as Record<string, boolean>,
+      workspaceChatsExpanded: {} as Record<string, boolean>,
+      workspaceReportsExpanded: {} as Record<string, boolean>,
+      workspaceFilesExpanded: {} as Record<string, boolean>,
       gettingStartedDismissed: false,
     }),
   )
@@ -1000,13 +1007,6 @@ export default function Layout(props: ParentProps) {
 
   command.register("layout", () => {
     const commands: CommandOption[] = [
-      {
-        id: "sidebar.toggle",
-        title: language.t("command.sidebar.toggle"),
-        category: language.t("command.category.view"),
-        keybind: "mod+b",
-        onSelect: () => layout.sidebar.toggle(),
-      },
       {
         id: "project.open",
         title: language.t("command.project.open"),
@@ -1936,6 +1936,12 @@ export default function Layout(props: ParentProps) {
     isBusy,
     workspaceExpanded: (directory, local) => store.workspaceExpanded[directory] ?? local,
     setWorkspaceExpanded: (directory, value) => setStore("workspaceExpanded", directory, value),
+    workspaceChatsExpanded: (directory) => store.workspaceChatsExpanded?.[directory] ?? true,
+    setWorkspaceChatsExpanded: (directory, value) => setStore("workspaceChatsExpanded", directory, value),
+    workspaceReportsExpanded: (directory) => store.workspaceReportsExpanded?.[directory] ?? false,
+    setWorkspaceReportsExpanded: (directory, value) => setStore("workspaceReportsExpanded", directory, value),
+    workspaceFilesExpanded: (directory) => store.workspaceFilesExpanded?.[directory] ?? false,
+    setWorkspaceFilesExpanded: (directory, value) => setStore("workspaceFilesExpanded", directory, value),
     showResetWorkspaceDialog: (root, directory) =>
       dialog.show(() => <DialogResetWorkspace root={root} directory={directory} />),
     showDeleteWorkspaceDialog: (root, directory) =>
@@ -2197,25 +2203,26 @@ export default function Layout(props: ParentProps) {
                 <Show
                   when={!WORKSPACES_HIDDEN && workspacesEnabled()}
                   fallback={
-                    <>
-                      <div class="shrink-0 pt-4 pb-1 px-2 text-12-medium text-text-weak uppercase tracking-wide">
-                        {language.t("sidebar.heading.chats")}
-                      </div>
-                      <div class="shrink-0 pb-4">
-                        <Button
-                          size="large"
-                          icon="new-session"
-                          class="w-full"
-                          onClick={() => {
-                            const dir = worktree()
-                            if (!dir) return
-                            navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
-                          }}
-                        >
-                          {language.t("command.session.new")}
-                        </Button>
-                      </div>
-                      <div class="flex-1 min-h-0">
+                    <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar pt-2">
+                      <WorkspaceSubsection
+                        label={language.t("sidebar.heading.chats")}
+                        open={() => workspaceSidebarCtx.workspaceChatsExpanded(worktree())}
+                        onOpenChange={(v) => workspaceSidebarCtx.setWorkspaceChatsExpanded(worktree(), v)}
+                      >
+                        <div class="px-2 pt-1 pb-2">
+                          <Button
+                            size="large"
+                            icon="new-session"
+                            class="w-full"
+                            onClick={() => {
+                              const dir = worktree()
+                              if (!dir) return
+                              navigateWithSidebarReset(`/${base64Encode(dir)}/session`)
+                            }}
+                          >
+                            {language.t("command.session.new")}
+                          </Button>
+                        </div>
                         <Show when={project()}>
                           {(p) => (
                             <LocalWorkspace
@@ -2226,8 +2233,22 @@ export default function Layout(props: ParentProps) {
                             />
                           )}
                         </Show>
-                      </div>
-                    </>
+                      </WorkspaceSubsection>
+                      <WorkspaceSubsection
+                        label={language.t("sidebar.heading.reports")}
+                        open={() => workspaceSidebarCtx.workspaceReportsExpanded(worktree())}
+                        onOpenChange={(v) => workspaceSidebarCtx.setWorkspaceReportsExpanded(worktree(), v)}
+                      >
+                        <WorkspaceReportSkillList directory={worktree()} />
+                      </WorkspaceSubsection>
+                      <WorkspaceSubsection
+                        label={language.t("sidebar.heading.files")}
+                        open={() => workspaceSidebarCtx.workspaceFilesExpanded(worktree())}
+                        onOpenChange={(v) => workspaceSidebarCtx.setWorkspaceFilesExpanded(worktree(), v)}
+                      >
+                        <WorkspaceFileTreeSection directory={worktree()} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
+                      </WorkspaceSubsection>
+                    </div>
                   }
                 >
                   <>

@@ -14,7 +14,10 @@ import { SessionFollowupDock } from "@/pages/session/composer/session-followup-d
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
 import type { SessionComposerState } from "@/pages/session/composer/session-composer-state"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
+import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
+import type { ReportSkillCommand } from "@/pages/session/report-session-link"
 import type { FollowupDraft } from "@/components/prompt-input/submit"
+import { PROMPT_INPUT_ENABLED } from "@/utils/feature-flags"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 
 export function SessionComposerRegion(props: {
@@ -42,6 +45,12 @@ export function SessionComposerRegion(props: {
     restoring?: string
     disabled?: boolean
     onRestore: (id: string) => void
+  }
+  report?: {
+    skills: ReportSkillCommand[]
+    hasReport: boolean
+    generating: boolean
+    onGenerate: (skillName: string) => Promise<unknown> | void
   }
   setPromptDockRef: (el: HTMLDivElement) => void
 }) {
@@ -249,7 +258,7 @@ export function SessionComposerRegion(props: {
               <Show
                 when={child()}
                 fallback={
-                  <Show when={!props.state.blocked()}>
+                  <Show when={!props.state.blocked() && PROMPT_INPUT_ENABLED}>
                     <PromptInput
                       ref={props.inputRef}
                       newSessionWorktree={props.newSessionWorktree}

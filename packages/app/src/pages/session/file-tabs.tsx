@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -173,7 +173,10 @@ function createScrollSync(input: { tab: () => string; view: ReturnType<typeof us
   }
 }
 
-export function FileTabContent(props: { tab: string }) {
+export function FileTabContent(props: {
+  tab: string
+  renderMissingFallback?: (path: string) => JSX.Element | undefined | null
+}) {
   const file = useFile()
   const comments = useComments()
   const language = useLanguage()
@@ -203,7 +206,6 @@ export function FileTabContent(props: { tab: string }) {
   const contents = createMemo(() => state()?.content?.content ?? "")
   const cacheKey = createMemo(() => sampledChecksum(contents()))
   const md = createMemo(() => /\.(md|markdown|mdx)$/i.test(path() ?? ""))
-  const [raw, setRaw] = createSignal(false)
   const selectedLines = createMemo<SelectedLineRange | null>(() => {
     const p = path()
     if (!p) return null
@@ -347,7 +349,7 @@ export function FileTabContent(props: { tab: string }) {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (activeFileTab() !== props.tab) return
-      if (md() && !raw()) return
+      if (md()) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
       if (event.key.toLowerCase() !== "f") return
 
@@ -363,7 +365,6 @@ export function FileTabContent(props: { tab: string }) {
     on(
       path,
       () => {
-        setRaw(false)
         commentsUi.note.reset()
       },
       { defer: true },
@@ -467,43 +468,33 @@ export function FileTabContent(props: { tab: string }) {
   )
 
   const renderContent = (source: string) => {
-    if (isMdxPath(path())) return raw() ? renderFile(source) : renderMdx(source)
-    if (md() && !raw()) return renderMarkdown(source)
+    if (isMdxPath(path())) return renderMdx(source)
+    if (md()) return renderMarkdown(source)
     return renderFile(source)
   }
 
   return (
     <Tabs.Content value={props.tab} class="mt-3 relative h-full min-h-0 flex flex-col overflow-hidden contain-strict">
-      <Switch>
-        <Match when={state()?.loaded && md()}>
-          <div class="px-4 pb-2 flex justify-end shrink-0">
-            <div class="flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
-              <IconButton
-                icon="eye"
-                size="small"
-                variant={raw() ? "ghost" : "secondary"}
-                class="size-6 rounded-md"
-                onClick={() => setRaw(false)}
-                aria-label="Preview markdown"
-              />
-              <IconButton
-                icon="code-lines"
-                size="small"
-                variant={raw() ? "secondary" : "ghost"}
-                class="size-6 rounded-md"
-                onClick={() => setRaw(true)}
-                aria-label="Show raw markdown"
-              />
-            </div>
-          </div>
-        </Match>
-      </Switch>
       <ScrollView
         class="flex-1 min-h-0"
         viewportRef={scrollSync.setViewport}
         onScroll={scrollSync.handleScroll as any}
       >
         <Switch>
+          <Match
+            when={(() => {
+              const s = state()
+              if (!s) return undefined
+              if (s.loading) return undefined
+              const p = path()
+              if (!p) return undefined
+              const isEmpty = s.loaded && !contents()
+              if (!s.error && !isEmpty) return undefined
+              return props.renderMissingFallback?.(p) ?? undefined
+            })()}
+          >
+            {(fallback) => fallback()}
+          </Match>
           <Match when={state()?.loaded}>{renderContent(contents())}</Match>
           <Match when={state()?.loading}>
             <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>

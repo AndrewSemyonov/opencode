@@ -25,7 +25,6 @@ export const dict = {
   "theme.scheme.light": "浅色",
   "theme.scheme.dark": "深色",
 
-  "command.sidebar.toggle": "切换侧边栏",
 
   "command.project.open": "打开项目",
 
@@ -62,7 +61,6 @@ export const dict = {
 
   "command.terminal.toggle": "切换终端",
 
-  "command.fileTree.toggle": "切换文件树",
 
   "command.review.toggle": "切换审查",
 
@@ -883,4 +881,13 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "创建持久化项目图标失败",
   "error.childStore.storeCreateFailed": "创建存储失败",
   "terminal.connectionLost.abnormalClose": "WebSocket 异常关闭：{{code}}",
+  "session.report.generate": "Generate report",
+  "session.report.regenerate": "Regenerate",
+  "session.report.menuHeading": "Choose a skill",
+  "session.report.starting": "Starting…",
+  "session.report.notGenerated": "Report not generated yet",
+  "session.report.userMessage": "Generate {{title}}",
+  "sidebar.heading.reports": "Reports",
+  "sidebar.heading.files": "Files",
+  "sidebar.reports.empty": "No report skills available",
 } satisfies Partial<Record<Keys, string>>
