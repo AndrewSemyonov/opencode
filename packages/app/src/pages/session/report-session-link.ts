@@ -6,7 +6,7 @@ const REPORT_SKILL_RE = /report|отч[еёЕЁ]т/i
 
 export type ReportSkillCommand = Pick<Command, "name" | "title" | "description" | "aliases" | "source" | "template">
 
-export const expectedReportPath = (skillName: string): string => `reports/${skillName}.mdx`
+export const expectedReportPath = (reportName: string): string => `reports/${reportName}.mdx`
 
 type FileListEntry = { type?: string; path?: string; name?: string }
 
