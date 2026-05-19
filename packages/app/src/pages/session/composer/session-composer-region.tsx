@@ -17,7 +17,6 @@ import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
 import type { ReportSkillCommand } from "@/pages/session/report-session-link"
 import type { FollowupDraft } from "@/components/prompt-input/submit"
-import { PROMPT_INPUT_ENABLED } from "@/utils/feature-flags"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 
 export function SessionComposerRegion(props: {
@@ -49,6 +48,7 @@ export function SessionComposerRegion(props: {
   report?: {
     skills: ReportSkillCommand[]
     hasReport: boolean
+    isReportSession: boolean
     generating: boolean
     onGenerate: (skillName: string) => Promise<unknown> | void
   }
@@ -135,6 +135,20 @@ export function SessionComposerRegion(props: {
     if (!id) return
     navigate(`/${route.params.dir}/session/${id}`)
   }
+
+  const promptInput = () => (
+    <PromptInput
+      ref={props.inputRef}
+      newSessionWorktree={props.newSessionWorktree}
+      onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
+      edit={props.followup?.edit}
+      onEditLoaded={props.followup?.onEditLoaded}
+      shouldQueue={props.followup?.queue}
+      onQueue={props.followup?.onQueue}
+      onAbort={props.followup?.onAbort}
+      onSubmit={props.onSubmit}
+    />
+  )
 
   createEffect(() => {
     const el = store.body
@@ -258,18 +272,27 @@ export function SessionComposerRegion(props: {
               <Show
                 when={child()}
                 fallback={
-                  <Show when={!props.state.blocked() && PROMPT_INPUT_ENABLED}>
-                    <PromptInput
-                      ref={props.inputRef}
-                      newSessionWorktree={props.newSessionWorktree}
-                      onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
-                      edit={props.followup?.edit}
-                      onEditLoaded={props.followup?.onEditLoaded}
-                      shouldQueue={props.followup?.queue}
-                      onQueue={props.followup?.onQueue}
-                      onAbort={props.followup?.onAbort}
-                      onSubmit={props.onSubmit}
-                    />
+                  <Show when={!props.state.blocked()}>
+                    <Show
+                      when={props.report && props.report.isReportSession}
+                      fallback={promptInput()}
+                    >
+                      <Show
+                        when={props.report!.hasReport}
+                        fallback={
+                          <div ref={props.inputRef} class="w-full flex items-center justify-center py-6">
+                            <ReportGenerateButton
+                              skills={props.report!.skills}
+                              onGenerate={props.report!.onGenerate}
+                              variant="center"
+                              disabled={props.report!.generating}
+                            />
+                          </div>
+                        }
+                      >
+                        {promptInput()}
+                      </Show>
+                    </Show>
                   </Show>
                 }
               >

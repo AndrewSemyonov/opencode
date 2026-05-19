@@ -21,6 +21,14 @@ import type { FileNode } from "@opencode-ai/sdk/v2"
 
 const MAX_DEPTH = 128
 
+// Directories first (A→Z); files newest-first. File names are timestamped
+// (e.g. report-YYYY-MM-DD-HH:mm.mdx), so descending name order = newest first.
+function treeOrder(a: FileNode, b: FileNode): number {
+  if (a.type !== b.type) return a.type === "directory" ? -1 : 1
+  if (a.type === "file") return b.name.localeCompare(a.name)
+  return a.name.localeCompare(b.name)
+}
+
 function pathToFileUrl(filepath: string): string {
   return `file://${encodeFilePath(filepath)}`
 }
@@ -327,7 +335,7 @@ export default function FileTree(props: {
       nodes = nodes.filter((node) => allow.has(node.name))
     }
     const current = filter()
-    if (!current) return nodes
+    if (!current) return [...nodes].sort(treeOrder)
 
     const parent = (path: string) => {
       const idx = path.lastIndexOf("/")
@@ -373,12 +381,7 @@ export default function FileTree(props: {
       seen.add(item)
     }
 
-    out.sort((a, b) => {
-      if (a.type !== b.type) {
-        return a.type === "directory" ? -1 : 1
-      }
-      return a.name.localeCompare(b.name)
-    })
+    out.sort(treeOrder)
 
     return out
   })
@@ -482,17 +485,7 @@ export default function FileTree(props: {
                       />
                     </Match>
                     <Match when={!node.ignored}>
-                      <span class="filetree-iconpair size-4">
-                        <FileIcon
-                          node={node}
-                          class="size-4 filetree-icon filetree-icon--color opacity-0 group-hover/filetree:opacity-100"
-                        />
-                        <FileIcon
-                          node={node}
-                          class="size-4 filetree-icon filetree-icon--mono group-hover/filetree:opacity-0"
-                          mono
-                        />
-                      </span>
+                      <FileIcon node={node} class="size-4 filetree-icon filetree-icon--color" />
                     </Match>
                   </Switch>
                 </FileTreeNode>

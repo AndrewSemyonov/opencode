@@ -2,6 +2,7 @@ import { createEffect, createMemo, onCleanup, Show, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Icon } from "@opencode-ai/ui/icon"
 import { Button } from "@opencode-ai/ui/button"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { useTheme } from "@opencode-ai/ui/theme/context"
@@ -46,7 +47,6 @@ export function Titlebar() {
 
   const mac = createMemo(() => platform.platform === "desktop" && platform.os === "macos")
   const windows = createMemo(() => platform.platform === "desktop" && platform.os === "windows")
-  const web = createMemo(() => platform.platform === "web")
   const zoom = () => platform.webviewZoom?.() ?? 1
   const minHeight = () => (mac() ? `${40 / zoom()}px` : undefined)
 
@@ -169,6 +169,22 @@ export function Titlebar() {
           "pl-2": !mac(),
         }}
       >
+        <TooltipKeybind
+          class="hidden xl:flex shrink-0 pl-1"
+          placement="bottom"
+          title={language.t("command.sidebar.toggle")}
+          keybind={command.keybind("sidebar.toggle")}
+        >
+          <Button
+            variant="ghost"
+            class="group/sidebar-toggle titlebar-icon w-8 h-6 p-0 box-border"
+            onClick={layout.sidebar.toggle}
+            aria-label={language.t("command.sidebar.toggle")}
+            aria-expanded={layout.sidebar.opened()}
+          >
+            <Icon size="small" name={layout.sidebar.opened() ? "sidebar-active" : "sidebar"} />
+          </Button>
+        </TooltipKeybind>
         <Show when={mac()}>
           <div class="h-full shrink-0" style={{ width: `${72 / zoom()}px` }} />
           <div class="xl:hidden w-10 shrink-0 flex items-center justify-center">
@@ -195,7 +211,6 @@ export function Titlebar() {
           </div>
         </Show>
         <div class="flex items-center gap-1 shrink-0">
-          <div class={web() ? "hidden xl:flex shrink-0 ml-14" : "hidden xl:flex shrink-0 ml-2"} />
           <div class="hidden xl:flex items-center shrink-0">
             <Show when={params.dir}>
               <div

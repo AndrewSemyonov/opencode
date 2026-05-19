@@ -5,6 +5,8 @@ import {
   extractReportPathFromText,
   extractSessionIdFromReport,
   findLatestReportPath,
+  findSessionIdByReportPath,
+  hasReportInvocation,
   isReportSkill,
   reportSkillAliases,
   reportSkillCommands,
@@ -217,6 +219,64 @@ describe("checkReportGenerated", () => {
       ],
     }
     expect(checkReportGenerated(messages, parts, ["report"])).toBe(false)
+  })
+})
+
+describe("hasReportInvocation", () => {
+  it("returns false with no messages or no aliases", () => {
+    expect(hasReportInvocation([], {}, ["report"])).toBe(false)
+    expect(hasReportInvocation(undefined, undefined, ["report"])).toBe(false)
+    expect(hasReportInvocation([userMessage("u1")], {}, [])).toBe(false)
+  })
+
+  it("returns true when a user message invoked /report even without a completed reply", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1")]
+    const parts = { u1: [textPart("p1", "u1", "/report")] }
+    expect(hasReportInvocation(messages, parts, ["report"])).toBe(true)
+  })
+
+  it("returns false for plain (non-report) chats", () => {
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = {
+      u1: [textPart("p1", "u1", "what skills do you have")],
+      a1: [textPart("p2", "a1", "here they are")],
+    }
+    expect(hasReportInvocation(messages, parts, ["report"])).toBe(false)
+  })
+
+  it("matches by alias", () => {
+    const messages: Message[] = [userMessage("u1")]
+    const parts = { u1: [textPart("p1", "u1", "/отчёт")] }
+    expect(hasReportInvocation(messages, parts, ["report", "отчёт"])).toBe(true)
+  })
+})
+
+describe("findSessionIdByReportPath", () => {
+  it("returns the session whose assistant message produced the report path", () => {
+    const messageBySession = {
+      ses_a: [userMessage("u1"), assistantMessage("a1", 100)],
+      ses_b: [userMessage("u2"), assistantMessage("a2", 100)],
+    }
+    const partByMessage = {
+      a1: [textPart("p1", "a1", "irrelevant answer")],
+      a2: [textPart("p2", "a2", "Готово: reports/report-2026-05-19-10:00.mdx")],
+    }
+    expect(
+      findSessionIdByReportPath(messageBySession, partByMessage, "reports/report-2026-05-19-10:00.mdx"),
+    ).toBe("ses_b")
+  })
+
+  it("normalizes a ./ prefixed path", () => {
+    const messageBySession = { ses_a: [assistantMessage("a1", 100)] }
+    const partByMessage = { a1: [textPart("p1", "a1", "see reports/report-x.md")] }
+    expect(findSessionIdByReportPath(messageBySession, partByMessage, "./reports/report-x.md")).toBe("ses_a")
+  })
+
+  it("returns undefined when no session references the path", () => {
+    const messageBySession = { ses_a: [assistantMessage("a1", 100)] }
+    const partByMessage = { a1: [textPart("p1", "a1", "no path here")] }
+    expect(findSessionIdByReportPath(messageBySession, partByMessage, "reports/report-x.md")).toBeUndefined()
+    expect(findSessionIdByReportPath(undefined, undefined, "reports/report-x.md")).toBeUndefined()
   })
 })
 

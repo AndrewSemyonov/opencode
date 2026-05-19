@@ -1,7 +1,8 @@
 import { useNavigate, useParams } from "@solidjs/router"
-import { createEffect, createMemo, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, Show, Switch } from "solid-js"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Markdown } from "@opencode-ai/ui/markdown"
+import { isMdxPath, MdxViewer } from "@opencode-ai/ui/mdx"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { getFilename } from "@opencode-ai/shared/util/path"
 import { FileProvider, useFile } from "@/context/file"
@@ -22,9 +23,12 @@ function FileView() {
     }
   })
 
+  const [raw, setRaw] = createSignal(false)
+
   createEffect(() => {
     const p = path()
     if (!p) return
+    setRaw(false)
     void file.load(p)
   })
 
@@ -35,6 +39,7 @@ function FileView() {
   })
   const contents = createMemo(() => state()?.content?.content ?? "")
   const isMarkdown = createMemo(() => /\.(md|markdown|mdx)$/i.test(path()))
+  const isMdx = createMemo(() => isMdxPath(path()))
 
   const goBack = () => {
     if (window.history.length > 1) {
@@ -60,21 +65,50 @@ function FileView() {
         <Show when={path() && getFilename(path()) !== path()}>
           <span class="text-12-regular text-text-weak truncate">{path()}</span>
         </Show>
+        <Show when={state()?.loaded && isMarkdown()}>
+          <div class="ml-auto flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
+            <IconButton
+              icon="eye"
+              size="small"
+              variant={raw() ? "ghost" : "secondary"}
+              class="size-6 rounded-md"
+              onClick={() => setRaw(false)}
+              aria-label="Preview markdown"
+            />
+            <IconButton
+              icon="code-lines"
+              size="small"
+              variant={raw() ? "secondary" : "ghost"}
+              class="size-6 rounded-md"
+              onClick={() => setRaw(true)}
+              aria-label="Show raw markdown"
+            />
+          </div>
+        </Show>
       </div>
       <ScrollView class="flex-1 min-h-0">
         <Switch>
           <Match when={state()?.loaded}>
             <Show
-              when={isMarkdown()}
+              when={isMarkdown() && !raw()}
               fallback={
                 <pre class="px-6 pt-6 pb-40 text-13-regular text-text-base whitespace-pre-wrap break-words select-text">
                   {contents()}
                 </pre>
               }
             >
-              <div class="px-6 pt-6 pb-40 select-text">
-                <Markdown text={contents()} class="max-w-200 mx-auto" />
-              </div>
+              <Show
+                when={isMdx()}
+                fallback={
+                  <div class="px-6 pt-6 pb-40 select-text">
+                    <Markdown text={contents()} class="max-w-200 mx-auto" />
+                  </div>
+                }
+              >
+                <div class="px-6 pt-6 pb-40 select-text">
+                  <MdxViewer text={contents()} path={path() || undefined} />
+                </div>
+              </Show>
             </Show>
           </Match>
           <Match when={state()?.loading}>
