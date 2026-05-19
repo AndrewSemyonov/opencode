@@ -48,6 +48,7 @@ import {
   checkReportGenerated,
   expectedReportPath,
   findLatestReportPath,
+  hasReportInvocation,
   isReportSkill,
   reportSkillCommands,
   reportSkillSignatures,
@@ -503,6 +504,11 @@ export default function Page() {
     const id = params.id
     if (!id) return false
     return checkReportGenerated(sync.data.message[id], sync.data.part, reportSignature())
+  })
+  const reportInvoked = createMemo(() => {
+    const id = params.id
+    if (!id) return false
+    return hasReportInvocation(sync.data.message[id], sync.data.part, reportSignature())
   })
   const latestReportPath = createMemo(() => {
     const id = params.id
@@ -2102,6 +2108,7 @@ export default function Page() {
             report={{
               skills: reportSkills(),
               hasReport: hasReport(),
+              isReportSession: reportInvoked(),
               generating: generatingReport(),
               onGenerate: generateReport,
             }}

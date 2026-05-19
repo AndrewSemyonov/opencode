@@ -48,6 +48,7 @@ export function SessionComposerRegion(props: {
   report?: {
     skills: ReportSkillCommand[]
     hasReport: boolean
+    isReportSession: boolean
     generating: boolean
     onGenerate: (skillName: string) => Promise<unknown> | void
   }
@@ -273,7 +274,7 @@ export function SessionComposerRegion(props: {
                 fallback={
                   <Show when={!props.state.blocked()}>
                     <Show
-                      when={props.report && props.report.skills.length > 0}
+                      when={props.report && props.report.isReportSession}
                       fallback={promptInput()}
                     >
                       <Show

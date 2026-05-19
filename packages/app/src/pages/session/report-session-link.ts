@@ -167,6 +167,23 @@ export const checkReportGenerated = (
   return false
 }
 
+export const hasReportInvocation = (
+  messages: Message[] | undefined,
+  parts: Record<string, Part[] | undefined> | undefined,
+  signature: string[] | ReportSkillSignature,
+): boolean => {
+  if (!messages || messages.length === 0) return false
+  const sig = toSignature(signature)
+  if (sig.aliases.length === 0 && (!sig.templatePrefixes || sig.templatePrefixes.length === 0)) return false
+  const partLookup = parts ?? {}
+  for (const message of messages) {
+    if (message.role !== "user") continue
+    const text = textPartContent(partLookup[message.id])
+    if (matchesReportInvocation(text, sig)) return true
+  }
+  return false
+}
+
 const REPORT_PATH_RE = /(?<![\w-])reports\/[^\s()<>"'\]`*]+\.mdx?\b/i
 
 export const extractReportPathFromText = (text: string): string | undefined => {
@@ -214,6 +231,28 @@ export const findLatestReportPath = (
     return extractReportPathFromText(responseText)
   }
   return undefined
+}
+
+export const findSessionIdByReportPath = (
+  messageBySession: Record<string, Message[] | undefined> | undefined,
+  partByMessage: Record<string, Part[] | undefined> | undefined,
+  reportPath: string,
+): string | undefined => {
+  if (!messageBySession || !reportPath) return undefined
+  const target = reportPath.replace(/^\.\//, "")
+  const partLookup = partByMessage ?? {}
+  let best: string | undefined
+  for (const [sessionId, messages] of Object.entries(messageBySession)) {
+    if (!messages || messages.length === 0) continue
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue
+      const text = assistantTextContent(partLookup[msg.id])
+      if (extractReportPathFromText(text) === target) {
+        if (!best || sessionId > best) best = sessionId
+      }
+    }
+  }
+  return best
 }
 
 const unquote = (raw: string): string => {

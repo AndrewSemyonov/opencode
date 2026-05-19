@@ -27,6 +27,7 @@ import {
   expectedReportPath,
   extractSessionIdFromReport,
   findLatestReportFileForSkill,
+  findSessionIdByReportPath,
   reportSkillCommands,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
@@ -275,6 +276,9 @@ async function resolveReportSessionId(
   } catch {
     sessionId = undefined
   }
+  if (!sessionId) {
+    sessionId = findSessionIdByReportPath(sync.data.message, sync.data.part, filePath)
+  }
   if (!sessionId) return undefined
   if (sync.session.get(sessionId)) return sessionId
   try {
@@ -365,7 +369,9 @@ const WorkspaceFileTreeBody = (props: {
 
   const openFromTree = async (filePath: string) => {
     if (props.kind === "file") {
-      navigate(`/${slug()}/file/${encodeURIComponent(filePath)}`, { replace: true })
+      const origin = await resolveReportSessionId(sdk, sync, filePath)
+      if (origin) navigate(`/${slug()}/session/${origin}`)
+      navigate(`/${slug()}/file/${encodeURIComponent(filePath)}`)
       return
     }
     // kind === "report"
