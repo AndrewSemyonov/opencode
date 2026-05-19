@@ -1,9 +1,7 @@
 ;(function () {
   var key = "opencode-theme-id"
-  localStorage.setItem(key, "void0")
-  localStorage.removeItem("opencode-theme-css-light")
-  localStorage.removeItem("opencode-theme-css-dark")
-  var themeId = "void0"
+  var themeId = localStorage.getItem(key) || "void0"
+  if (themeId === "oc-1") themeId = "oc-2"
 
   var scheme = localStorage.getItem("opencode-color-scheme") || "system"
   var isDark = scheme === "dark" || (scheme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
