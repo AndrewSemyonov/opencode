@@ -308,8 +308,8 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
       path = undefined
     }
     if (!path) path = expectedReportPath(skill.name)
-    requestOpenFile({ kind: "report", path })
     const target = await resolveReportSessionId(sdk, sync, path)
+    requestOpenFile({ kind: "report", path, sessionId: target })
     if (target) {
       navigate(`/${slug()}/session/${target}`)
       return
@@ -376,7 +376,7 @@ const WorkspaceFileTreeBody = (props: {
     }
     // kind === "report"
     const target = await resolveReportSessionId(sdk, sync, filePath)
-    requestOpenFile({ kind: "report", path: filePath })
+    requestOpenFile({ kind: "report", path: filePath, sessionId: target })
     if (target) navigate(`/${slug()}/session/${target}`)
     else navigate(`/${slug()}/session`)
   }

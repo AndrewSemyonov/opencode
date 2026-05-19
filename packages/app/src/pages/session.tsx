@@ -54,7 +54,7 @@ import {
   reportSkillSignatures,
 } from "@/pages/session/report-session-link"
 import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
-import { requestOpenFile } from "@/pages/session/pending-file-open"
+import { consumePendingFileOpen, peekPendingFileOpen, requestOpenFile } from "@/pages/session/pending-file-open"
 import { base64Encode } from "@opencode-ai/shared/util/encode"
 import { Binary } from "@opencode-ai/shared/util/binary"
 import {
@@ -412,6 +412,28 @@ export default function Page() {
     ),
   )
 
+  createEffect(
+    on(
+      () => params.id,
+      (id) => {
+        if (id) return
+        const ws = workspaceTabs()
+        const cur = ws.tabs()
+        const isReport = (t: string) => {
+          const p = decodeURIComponent(t.replace(/^file:\/\//, ""))
+            .replace(/^\.\//, "")
+            .replace(/^\/+/, "")
+          return /(?:^|\/)reports\/[^/]/.test(p)
+        }
+        const kept = cur.all.filter((t) => !isReport(t))
+        const activeIsReport = !!cur.active && isReport(cur.active)
+        if (kept.length === cur.all.length && !activeIsReport) return
+        ws.setAll(kept)
+        ws.setActive(activeIsReport ? kept[kept.length - 1] : cur.active)
+      },
+    ),
+  )
+
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const size = createSizing()
 
@@ -517,9 +539,16 @@ export default function Page() {
   })
   createEffect(
     on(latestReportPath, (path, prev) => {
-      if (!path) return
+      const id = params.id
+      if (!path || !id) {
+        const pending = peekPendingFileOpen()
+        if (pending?.kind === "report" && pending.sessionId && pending.sessionId !== id) {
+          consumePendingFileOpen()
+        }
+        return
+      }
       if (path === prev) return
-      requestOpenFile({ kind: "report", path })
+      requestOpenFile({ kind: "report", path, sessionId: id })
     }),
   )
   const [generatingReport, setGeneratingReport] = createSignal(false)

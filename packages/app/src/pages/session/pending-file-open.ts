@@ -1,8 +1,8 @@
 import { createSignal } from "solid-js"
 
 export type PendingFileOpen =
-  | { kind: "tab"; path: string }
-  | { kind: "report"; path: string }
+  | { kind: "tab"; path: string; sessionId?: string }
+  | { kind: "report"; path: string; sessionId?: string }
   | { kind: "file-fullscreen"; path: string }
 
 const [pendingFileOpen, setPendingFileOpen] = createSignal<PendingFileOpen | undefined>(undefined)
