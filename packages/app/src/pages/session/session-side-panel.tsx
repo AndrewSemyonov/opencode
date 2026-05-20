@@ -42,7 +42,7 @@ export function SessionSidePanel(props: {
   const file = useFile()
   const language = useLanguage()
   const command = useCommand()
-  const { sessionKey, tabs, view } = useSessionLayout()
+  const { params, sessionKey, tabs, view } = useSessionLayout()
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
 
@@ -112,6 +112,14 @@ export function SessionSidePanel(props: {
     on([peekPendingFileOpen, file.ready], ([pending, ready]) => {
       if (!pending || !ready) return
       if (pending.kind !== "tab" && pending.kind !== "report") return
+      if (pending.sessionId && pending.sessionId !== params.id) {
+        consumePendingFileOpen()
+        return
+      }
+      if (pending.kind === "report" && !params.id) {
+        consumePendingFileOpen()
+        return
+      }
       untrack(() => {
         consumePendingFileOpen()
         const tab = file.tab(pending.path)

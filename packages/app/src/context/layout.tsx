@@ -12,6 +12,7 @@ import { decode64 } from "@/utils/base64"
 import { same } from "@/utils/same"
 import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
 import { createPathHelpers } from "./file/path"
+import { workspaceKey } from "@/pages/layout/helpers"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_SIDEBAR_WIDTH = 344
@@ -257,6 +258,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         sessionTabs: {} as Record<string, SessionTabs>,
         sessionView: {} as Record<string, SessionView>,
+        reportSessions: {} as Record<string, Record<string, string>>,
         handoff: {
           tabs: undefined as TabHandoff | undefined,
         },
@@ -622,6 +624,34 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         toggleWorkspaces(directory: string) {
           const current = store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
           setStore("sidebar", "workspaces", directory, !current)
+        },
+      },
+      reportSessions: {
+        isReportSession(directory: string, sessionId: string | undefined): boolean {
+          if (!sessionId) return false
+          return !!store.reportSessions[workspaceKey(directory)]?.[sessionId]
+        },
+        reportSkillForSession(directory: string, sessionId: string | undefined): string | undefined {
+          if (!sessionId) return undefined
+          return store.reportSessions[workspaceKey(directory)]?.[sessionId]
+        },
+        reportSessionIds(directory: string): Set<string> {
+          return new Set(Object.keys(store.reportSessions[workspaceKey(directory)] ?? {}))
+        },
+        markReportSession(directory: string, sessionId: string, skillName: string) {
+          if (!sessionId) return
+          const key = workspaceKey(directory)
+          if (store.reportSessions[key]?.[sessionId] === skillName) return
+          setStore("reportSessions", key, (prev) => {
+            const next = { ...(prev ?? {}) }
+            next[sessionId] = skillName
+            const ids = Object.keys(next)
+            if (ids.length > 200) {
+              ids.sort()
+              for (const id of ids.slice(0, ids.length - 200)) delete next[id]
+            }
+            return next
+          })
         },
       },
       terminal: {
