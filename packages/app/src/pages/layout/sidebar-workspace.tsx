@@ -5,6 +5,7 @@ import { createSortable } from "@thisbeyond/solid-dnd"
 import { createMediaQuery } from "@solid-primitives/media"
 import { base64Encode } from "@opencode-ai/shared/util/encode"
 import { getFilename } from "@opencode-ai/shared/util/path"
+import { Binary } from "@opencode-ai/shared/util/binary"
 import { Button } from "@opencode-ai/ui/button"
 import { Collapsible } from "@opencode-ai/ui/collapsible"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
@@ -13,7 +14,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { type Session } from "@opencode-ai/sdk/v2/client"
-import { type LocalProject } from "@/context/layout"
+import { type LocalProject, useLayout } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
@@ -28,6 +29,7 @@ import {
   extractSessionIdFromReport,
   findLatestReportFileForSkill,
   findSessionIdByReportPath,
+  isReportFileForSkill,
   reportSkillCommands,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
@@ -293,11 +295,39 @@ async function resolveReportSessionId(
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
   const sync = useSync()
+  const globalSync = useGlobalSync()
+  const layout = useLayout()
   const navigate = useNavigate()
-  const params = useParams()
   const language = useLanguage()
   const slug = createMemo(() => base64Encode(props.directory))
   const skills = createMemo<ReportSkillCommand[]>(() => reportSkillCommands(sync.data.command))
+
+  const createReportSession = async (skillName: string): Promise<string | undefined> => {
+    const created = await sdk.client.session
+      .create()
+      .then((x) => x.data ?? undefined)
+      .catch(() => undefined)
+    if (!created) return undefined
+    const [, setStore] = globalSync.child(props.directory)
+    setStore("session", (list) => {
+      const result = Binary.search(list, created.id, (item) => item.id)
+      const next = [...list]
+      if (result.found) next[result.index] = created
+      else next.splice(result.index, 0, created)
+      return next
+    })
+    layout.reportSessions.markReportSession(props.directory, created.id, skillName)
+    layout.handoff.setTabs(base64Encode(props.directory), created.id)
+    return created.id
+  }
+
+  const existingPendingSession = (skillName: string): string | undefined => {
+    for (const id of layout.reportSessions.reportSessionIds(props.directory)) {
+      if (layout.reportSessions.reportSkillForSession(props.directory, id) !== skillName) continue
+      if (sync.session.get(id)) return id
+    }
+    return undefined
+  }
 
   const open = async (skill: ReportSkillCommand) => {
     let path: string | undefined
@@ -309,14 +339,43 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     }
     if (!path) path = expectedReportPath(skill.name)
     const target = await resolveReportSessionId(sdk, sync, path)
-    requestOpenFile({ kind: "report", path, sessionId: target })
     if (target) {
+      layout.reportSessions.markReportSession(props.directory, target, skill.name)
+      requestOpenFile({ kind: "report", path, sessionId: target })
       navigate(`/${slug()}/session/${target}`)
       return
     }
-    if (params.dir === slug() && params.id) return
-    navigate(`/${slug()}/session`)
+    const pending = existingPendingSession(skill.name)
+    if (pending) {
+      requestOpenFile({ kind: "report", path, sessionId: pending })
+      navigate(`/${slug()}/session/${pending}`)
+      return
+    }
+    const created = await createReportSession(skill.name)
+    if (!created) return
+    requestOpenFile({ kind: "report", path, sessionId: created })
+    navigate(`/${slug()}/session/${created}`)
   }
+
+  createEffect(() => {
+    if (sync.data.command.length === 0) return
+    const list = skills()
+    if (list.length === 0) return
+    void (async () => {
+      let files: Awaited<ReturnType<typeof sdk.client.file.list>>["data"]
+      try {
+        files = (await sdk.client.file.list({ path: "reports" })).data
+      } catch {
+        return
+      }
+      for (const skill of list) {
+        const file = findLatestReportFileForSkill(files, skill.name)
+        if (!file) continue
+        const sid = await resolveReportSessionId(sdk, sync, file)
+        if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
+      }
+    })()
+  })
 
   return (
     <div class="px-2 pb-2 flex flex-col gap-0.5">
@@ -364,8 +423,12 @@ const WorkspaceFileTreeBody = (props: {
 }): JSX.Element => {
   const sdk = useSDK()
   const sync = useSync()
+  const layout = useLayout()
   const navigate = useNavigate()
   const slug = createMemo(() => base64Encode(props.directory))
+
+  const skillForReportFile = (filePath: string): string | undefined =>
+    reportSkillCommands(sync.data.command).find((cmd) => isReportFileForSkill(filePath, cmd.name))?.name
 
   const openFromTree = async (filePath: string) => {
     if (props.kind === "file") {
@@ -376,6 +439,10 @@ const WorkspaceFileTreeBody = (props: {
     }
     // kind === "report"
     const target = await resolveReportSessionId(sdk, sync, filePath)
+    if (target) {
+      const skillName = skillForReportFile(filePath)
+      if (skillName) layout.reportSessions.markReportSession(props.directory, target, skillName)
+    }
     requestOpenFile({ kind: "report", path: filePath, sessionId: target })
     if (target) navigate(`/${slug()}/session/${target}`)
     else navigate(`/${slug()}/session`)
@@ -480,6 +547,7 @@ export const SortableWorkspace = (props: {
   const params = useParams()
   const globalSync = useGlobalSync()
   const language = useLanguage()
+  const layout = useLayout()
   const sortable = createSortable(props.directory)
   const [workspaceStore, setWorkspaceStore] = globalSync.child(props.directory, { bootstrap: false })
   const [menu, setMenu] = createStore({
@@ -487,7 +555,9 @@ export const SortableWorkspace = (props: {
     pendingRename: false,
   })
   const slug = createMemo(() => base64Encode(props.directory))
-  const sessions = createMemo(() => sortedRootSessions(workspaceStore, props.sortNow()))
+  const sessions = createMemo(() =>
+    sortedRootSessions(workspaceStore, props.sortNow(), layout.reportSessions.reportSessionIds(props.directory)),
+  )
   const local = createMemo(() => props.directory === props.project.worktree)
   const active = createMemo(() => workspaceKey(props.ctx.currentDir()) === workspaceKey(props.directory))
   const workspaceValue = createMemo(() => {
@@ -498,7 +568,7 @@ export const SortableWorkspace = (props: {
   const boot = createMemo(() => open() || active())
   const booted = createMemo((prev) => prev || workspaceStore.status === "complete", false)
   const count = createMemo(() => sessions()?.length ?? 0)
-  const hasMore = createMemo(() => workspaceStore.sessionTotal > count())
+  const hasMore = createMemo(() => workspaceStore.hasMore)
   const busy = createMemo(() => props.ctx.isBusy(props.directory))
   const wasBusy = createMemo((prev) => prev || busy(), false)
   const loading = createMemo(() => open() && !booted() && count() === 0 && !wasBusy())
@@ -646,16 +716,23 @@ export const LocalWorkspace = (props: {
 }): JSX.Element => {
   const globalSync = useGlobalSync()
   const language = useLanguage()
+  const layout = useLayout()
   const workspace = createMemo(() => {
     const [store, setStore] = globalSync.child(props.project.worktree)
     return { store, setStore }
   })
   const slug = createMemo(() => base64Encode(props.project.worktree))
-  const sessions = createMemo(() => sortedRootSessions(workspace().store, props.sortNow()))
+  const sessions = createMemo(() =>
+    sortedRootSessions(
+      workspace().store,
+      props.sortNow(),
+      layout.reportSessions.reportSessionIds(props.project.worktree),
+    ),
+  )
   const booted = createMemo((prev) => prev || workspace().store.status === "complete", false)
   const count = createMemo(() => sessions()?.length ?? 0)
   const loading = createMemo(() => !booted() && count() === 0)
-  const hasMore = createMemo(() => workspace().store.sessionTotal > count())
+  const hasMore = createMemo(() => workspace().store.hasMore)
   const loadMore = async () => {
     workspace().setStore("limit", (limit) => (limit ?? 0) + 5)
     await globalSync.project.loadSessions(props.project.worktree)

@@ -7,6 +7,7 @@ export async function loadRootSessionsWithFallback(input: RootLoadArgs) {
       data: result.data,
       limit: input.limit,
       limited: true,
+      hasMore: (result.data?.length ?? 0) >= input.limit,
     } as const
   } catch {
     const result = await input.list({ directory: input.directory, roots: true })
@@ -14,6 +15,7 @@ export async function loadRootSessionsWithFallback(input: RootLoadArgs) {
       data: result.data,
       limit: input.limit,
       limited: false,
+      hasMore: false,
     } as const
   }
 }

@@ -9,7 +9,7 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@opencode-ai/ui/toast"
 import { getFilename } from "@opencode-ai/shared/util/path"
-import { createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
+import { batch, createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { Persist, persisted } from "@/utils/persist"
@@ -212,15 +212,18 @@ function createGlobalSync() {
           limit,
           permission: store.permission,
         })
-        setStore(
-          "sessionTotal",
-          estimateRootSessionTotal({
-            count: nonArchived.length,
-            limit: x.limit,
-            limited: x.limited,
-          }),
-        )
-        setStore("session", reconcile(sessions, { key: "id" }))
+        batch(() => {
+          setStore(
+            "sessionTotal",
+            estimateRootSessionTotal({
+              count: nonArchived.length,
+              limit: x.limit,
+              limited: x.limited,
+            }),
+          )
+          setStore("hasMore", x.hasMore)
+          setStore("session", reconcile(sessions, { key: "id" }))
+        })
         cleanupDroppedSessionCaches(store, setStore, sessions, setSessionTodo)
         sessionMeta.set(directory, { limit })
       })

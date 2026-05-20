@@ -45,10 +45,10 @@ import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
 import {
-  checkReportGenerated,
   expectedReportPath,
+  extractReportPathFromText,
   findLatestReportPath,
-  hasReportInvocation,
+  isReportFileForSkill,
   isReportSkill,
   reportSkillCommands,
   reportSkillSignatures,
@@ -522,20 +522,27 @@ export default function Page() {
 
   const reportSkills = createMemo(() => reportSkillCommands(sync.data.command))
   const reportSignature = createMemo(() => reportSkillSignatures(sync.data.command))
-  const hasReport = createMemo(() => {
-    const id = params.id
-    if (!id) return false
-    return checkReportGenerated(sync.data.message[id], sync.data.part, reportSignature())
-  })
-  const reportInvoked = createMemo(() => {
-    const id = params.id
-    if (!id) return false
-    return hasReportInvocation(sync.data.message[id], sync.data.part, reportSignature())
-  })
+  const reportInvoked = createMemo(() => layout.reportSessions.isReportSession(sdk.directory, params.id))
   const latestReportPath = createMemo(() => {
     const id = params.id
     if (!id) return undefined
     return findLatestReportPath(sync.data.message[id], sync.data.part, reportSignature())
+  })
+  const hasReport = createMemo(() => {
+    const id = params.id
+    if (!id || !reportInvoked()) return false
+    const messages = sync.data.message[id]
+    if (!messages || messages.length === 0) return false
+    const parts = sync.data.part ?? {}
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue
+      if (typeof msg.time?.completed !== "number") continue
+      const partList = parts[msg.id] ?? []
+      let text = ""
+      for (const p of partList) if (p.type === "text") text += p.text + "\n"
+      if (extractReportPathFromText(text)) return true
+    }
+    return false
   })
   createEffect(
     on(latestReportPath, (path, prev) => {
@@ -547,6 +554,8 @@ export default function Page() {
         }
         return
       }
+      const skill = reportSkills().find((s) => isReportFileForSkill(path, s.name))
+      if (skill) layout.reportSessions.markReportSession(sdk.directory, id, skill.name)
       if (path === prev) return
       requestOpenFile({ kind: "report", path, sessionId: id })
     }),
@@ -568,7 +577,8 @@ export default function Page() {
 
       let sessionID = params.id
       const sessionDirectory = sdk.directory
-      if (!sessionID) {
+      const fresh = !sessionID || userMessages().length === 0
+      if (!fresh || !sessionID) {
         const created = await sdk.client.session
           .create()
           .then((x) => x.data ?? undefined)
@@ -586,9 +596,12 @@ export default function Page() {
           return next
         })
         local.session.promote(sessionDirectory, created.id)
+        layout.reportSessions.markReportSession(sessionDirectory, created.id, skillName)
         layout.handoff.setTabs(base64Encode(sessionDirectory), created.id)
         sessionID = created.id
         navigate(`/${base64Encode(sessionDirectory)}/session/${created.id}`)
+      } else {
+        layout.reportSessions.markReportSession(sessionDirectory, sessionID, skillName)
       }
 
       const text = `/${skillName}`
