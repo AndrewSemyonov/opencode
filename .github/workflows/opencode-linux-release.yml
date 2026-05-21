@@ -1,6 +1,12 @@
 name: Build OpenCode Linux Binary
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, for example opencode-v0.1.17
+        required: true
+        type: string
   push:
     tags:
       - 'opencode-v*'
@@ -12,7 +18,21 @@ jobs:
   build-linux-x64:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve release
+        id: release
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^opencode-v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "Invalid release tag: $TAG" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#opencode-v}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -22,6 +42,8 @@ jobs:
         run: bun install
 
       - name: Build OpenCode binaries
+        env:
+          OPENCODE_VERSION: ${{ steps.release.outputs.version }}
         run: bun run --cwd packages/opencode build
 
       - name: Prepare linux-x64 release assets
@@ -34,6 +56,8 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          overwrite_files: true
           files: |
             opencode-linux-x64
             opencode-linux-x64.sha256
