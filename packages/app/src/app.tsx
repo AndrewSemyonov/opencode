@@ -30,6 +30,7 @@ import { CommandProvider } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
 import { GlobalSDKProvider } from "@/context/global-sdk"
+import { AuthRoleProvider, ReadonlyBanner } from "@/context/auth-role"
 import { GlobalSyncProvider } from "@/context/global-sync"
 import { HighlightsProvider } from "@/context/highlights"
 import { LanguageProvider, type Locale, useLanguage } from "@/context/language"
@@ -291,19 +292,22 @@ export function AppInterface(props: {
       <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
         <ServerKey>
           <GlobalSDKProvider>
-            <GlobalSyncProvider>
-              <Dynamic
-                component={props.router ?? Router}
-                root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
-              >
-                <Route path="/" component={HomeRoute} />
-                <Route path="/:dir" component={DirectoryLayout}>
-                  <Route path="/" component={SessionIndexRoute} />
-                  <Route path="/session/:id?" component={SessionRoute} />
-                  <Route path="/file/*path" component={FileViewRoute} />
-                </Route>
-              </Dynamic>
-            </GlobalSyncProvider>
+            <AuthRoleProvider>
+              <ReadonlyBanner />
+              <GlobalSyncProvider>
+                <Dynamic
+                  component={props.router ?? Router}
+                  root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
+                >
+                  <Route path="/" component={HomeRoute} />
+                  <Route path="/:dir" component={DirectoryLayout}>
+                    <Route path="/" component={SessionIndexRoute} />
+                    <Route path="/session/:id?" component={SessionRoute} />
+                    <Route path="/file/*path" component={FileViewRoute} />
+                  </Route>
+                </Dynamic>
+              </GlobalSyncProvider>
+            </AuthRoleProvider>
           </GlobalSDKProvider>
         </ServerKey>
       </ConnectionGate>

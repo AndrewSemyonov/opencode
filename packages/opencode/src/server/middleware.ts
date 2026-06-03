@@ -36,17 +36,59 @@ export const ErrorMiddleware: ErrorHandler = (err, c) => {
   })
 }
 
+type AuthRole = "full" | "readonly"
+
+// Read at request time (not import time) so that tests and runtime env reloads work.
+function readAuthCreds() {
+  const password = Flag.OPENCODE_SERVER_PASSWORD ?? process.env["OPENCODE_SERVER_PASSWORD"]
+  const roPassword = Flag.OPENCODE_READONLY_PASSWORD ?? process.env["OPENCODE_READONLY_PASSWORD"]
+  return {
+    password,
+    roPassword,
+    username: password
+      ? (Flag.OPENCODE_SERVER_USERNAME ?? process.env["OPENCODE_SERVER_USERNAME"] ?? "opencode")
+      : undefined,
+    roUsername: roPassword
+      ? (Flag.OPENCODE_READONLY_USERNAME ?? process.env["OPENCODE_READONLY_USERNAME"] ?? "opencode-readonly")
+      : undefined,
+  }
+}
+
 export const AuthMiddleware: MiddlewareHandler = (c, next) => {
   // Allow CORS preflight requests to succeed without auth.
   // Browser clients sending Authorization headers will preflight with OPTIONS.
   if (c.req.method === "OPTIONS") return next()
-  const password = Flag.OPENCODE_SERVER_PASSWORD
-  if (!password) return next()
-  const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+  const { password, roPassword, username, roUsername } = readAuthCreds()
+  if (!password && !roPassword) return next()
 
   if (c.req.query("auth_token")) c.req.raw.headers.set("authorization", `Basic ${c.req.query("auth_token")}`)
 
-  return basicAuth({ username, password })(c, next)
+  return basicAuth({
+    verifyUser: (u, p, ctx) => {
+      if (password && u === username && p === password) {
+        ctx.set("authRole", "full" satisfies AuthRole)
+        return true
+      }
+      if (roPassword && u === roUsername && p === roPassword) {
+        ctx.set("authRole", "readonly" satisfies AuthRole)
+        return true
+      }
+      return false
+    },
+  })(c, next)
+}
+
+// Must run after AuthMiddleware. Rejects mutating methods when the request
+// authenticated with the read-only credential pair.
+export const ReadonlyEnforcementMiddleware: MiddlewareHandler = (c, next) => {
+  const role = c.get("authRole" as never) as AuthRole | undefined
+  if (role === "readonly") {
+    const method = c.req.method
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+      throw new HTTPException(403, { message: "Read-only credentials cannot perform write operations" })
+    }
+  }
+  return next()
 }
 
 export const LoggerMiddleware: MiddlewareHandler = async (c, next) => {

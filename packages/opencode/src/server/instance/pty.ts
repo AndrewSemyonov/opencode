@@ -184,6 +184,11 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
           onClose: () => void
         }
 
+        // Terminal access is a mutation (it lets the user run arbitrary shell
+        // commands). Read-only callers must not be able to open a pty WS even
+        // though the WebSocket upgrade itself is a GET — block at open-time.
+        const role = c.get("authRole" as never) as "full" | "readonly" | undefined
+        const readonly = role === "readonly"
         const id = PtyID.zod.parse(c.req.param("ptyID"))
         const cursor = (() => {
           const value = c.req.query("cursor")
@@ -223,6 +228,10 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
 
         return {
           async onOpen(_event, ws) {
+            if (readonly) {
+              ws.close(1008, "Read-only: pty access denied")
+              return
+            }
             const socket = ws.raw
             if (!isSocket(socket)) {
               ws.close()

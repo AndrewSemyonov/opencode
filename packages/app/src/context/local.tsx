@@ -396,6 +396,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (msg.sessionID !== session) return
           if (saved.session[session] !== undefined) return
           if (handoff.has(handoffKey(sdk.directory, session))) return
+          // Older sessions may lack a `model` on the user message (e.g. when the
+          // first turn was sent before model selection persisted). Skipping the
+          // restore is safer than crashing the whole session view.
+          if (!msg.model) return
 
           setSaved("session", session, {
             agent: msg.agent,

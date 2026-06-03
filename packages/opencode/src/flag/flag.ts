@@ -47,6 +47,10 @@ export namespace Flag {
   export declare const OPENCODE_CLIENT: string
   export const OPENCODE_SERVER_PASSWORD = process.env["OPENCODE_SERVER_PASSWORD"]
   export const OPENCODE_SERVER_USERNAME = process.env["OPENCODE_SERVER_USERNAME"]
+  // Optional second credential pair scoped to read-only access (GET/HEAD/OPTIONS).
+  // Used by external services that need to mirror session history without write capability.
+  export const OPENCODE_READONLY_PASSWORD = process.env["OPENCODE_READONLY_PASSWORD"]
+  export const OPENCODE_READONLY_USERNAME = process.env["OPENCODE_READONLY_USERNAME"]
   export const OPENCODE_ENABLE_QUESTION_TOOL = truthy("OPENCODE_ENABLE_QUESTION_TOOL")
 
   // Experimental

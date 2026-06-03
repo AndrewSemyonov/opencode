@@ -93,6 +93,34 @@ export const GlobalRoutes = lazy(() =>
       },
     )
     .get(
+      "/info",
+      describeRoute({
+        summary: "Get auth role",
+        description:
+          "Report which credential role the current request authenticated as. The web UI uses this to decide whether to render mutation controls.",
+        operationId: "global.info",
+        responses: {
+          200: {
+            description: "Auth info",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    authRole: z.union([z.literal("full"), z.literal("readonly")]),
+                    version: z.string(),
+                  }),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const authRole = (c.get("authRole" as never) as "full" | "readonly" | undefined) ?? "full"
+        return c.json({ authRole, version: Installation.VERSION })
+      },
+    )
+    .get(
       "/event",
       describeRoute({
         summary: "Get global events",

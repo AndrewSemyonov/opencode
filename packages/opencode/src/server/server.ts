@@ -3,7 +3,14 @@ import { Hono } from "hono"
 import { adapter } from "#hono"
 import { MDNS } from "./mdns"
 import { lazy } from "@/util/lazy"
-import { AuthMiddleware, CompressionMiddleware, CorsMiddleware, ErrorMiddleware, LoggerMiddleware } from "./middleware"
+import {
+  AuthMiddleware,
+  CompressionMiddleware,
+  CorsMiddleware,
+  ErrorMiddleware,
+  LoggerMiddleware,
+  ReadonlyEnforcementMiddleware,
+} from "./middleware"
 import { InstanceRoutes } from "./instance"
 import { initProjectors } from "./projectors"
 import { Log } from "@/util/log"
@@ -34,6 +41,7 @@ export namespace Server {
       app: app
         .onError(ErrorMiddleware)
         .use(AuthMiddleware)
+        .use(ReadonlyEnforcementMiddleware)
         .use(LoggerMiddleware)
         .use(CompressionMiddleware)
         .use(CorsMiddleware(opts))

@@ -18,6 +18,7 @@ import { ReportGenerateButton } from "@/pages/session/composer/report-generate-b
 import type { ReportSkillCommand } from "@/pages/session/report-session-link"
 import type { FollowupDraft } from "@/components/prompt-input/submit"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
+import { useAuthRole } from "@/context/auth-role"
 
 export function SessionComposerRegion(props: {
   state: SessionComposerState
@@ -136,19 +137,25 @@ export function SessionComposerRegion(props: {
     navigate(`/${route.params.dir}/session/${id}`)
   }
 
-  const promptInput = () => (
-    <PromptInput
-      ref={props.inputRef}
-      newSessionWorktree={props.newSessionWorktree}
-      onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
-      edit={props.followup?.edit}
-      onEditLoaded={props.followup?.onEditLoaded}
-      shouldQueue={props.followup?.queue}
-      onQueue={props.followup?.onQueue}
-      onAbort={props.followup?.onAbort}
-      onSubmit={props.onSubmit}
-    />
-  )
+  const authRole = useAuthRole()
+  const promptInput = () => {
+    // Read-only sessions can't send messages. The server enforces this, but
+    // surfacing a disabled input would just confuse admins inspecting a chat.
+    if (authRole.loaded && authRole.role === "readonly") return null
+    return (
+      <PromptInput
+        ref={props.inputRef}
+        newSessionWorktree={props.newSessionWorktree}
+        onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
+        edit={props.followup?.edit}
+        onEditLoaded={props.followup?.onEditLoaded}
+        shouldQueue={props.followup?.queue}
+        onQueue={props.followup?.onQueue}
+        onAbort={props.followup?.onAbort}
+        onSubmit={props.onSubmit}
+      />
+    )
+  }
 
   createEffect(() => {
     const el = store.body

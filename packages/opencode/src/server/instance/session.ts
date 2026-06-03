@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import { stream } from "hono/streaming"
+import { HTTPException } from "hono/http-exception"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import { SessionID, MessageID, PartID } from "@/session/schema"
 import z from "zod"
@@ -74,6 +75,72 @@ export const SessionRoutes = lazy(() =>
           sessions.push(session)
         }
         return c.json(sessions)
+      },
+    )
+    .get(
+      "/export-all",
+      describeRoute({
+        summary: "Bulk export sessions and messages",
+        description:
+          "Returns sessions (optionally filtered by `since`) with all messages inlined. Designed for snapshotting state in one round-trip before container shutdown.",
+        operationId: "session.exportAll",
+        responses: {
+          200: {
+            description: "Sessions with messages",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    sessions: z.array(
+                      z.object({
+                        info: Session.Info,
+                        messages: MessageV2.WithParts.array(),
+                      }),
+                    ),
+                  }),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          since: z.coerce
+            .number()
+            .optional()
+            .meta({ description: "Only sessions updated on or after this timestamp (milliseconds since epoch)" }),
+          directory: z.string().optional().meta({ description: "Filter sessions by project directory" }),
+        }),
+      ),
+      async (c) => {
+        // Defence in depth: ReadonlyEnforcementMiddleware only blocks
+        // non-GET methods, so a readonly-authenticated request would
+        // otherwise be able to dump every session+message in the
+        // sandbox. The expected caller (opspace finalSync) always uses
+        // the full-access credential pair.
+        const role = c.get("authRole" as never) as "full" | "readonly" | undefined
+        if (role === "readonly") {
+          throw new HTTPException(403, {
+            message: "Bulk export restricted to full-access credentials",
+          })
+        }
+        const query = c.req.valid("query")
+        const out: Array<{ info: Session.Info; messages: MessageV2.WithParts[] }> = []
+        for await (const info of Session.list({
+          start: query.since,
+          directory: query.directory,
+        })) {
+          const messages = await AppRuntime.runPromise(
+            Effect.gen(function* () {
+              const session = yield* Session.Service
+              return yield* session.messages({ sessionID: info.id })
+            }),
+          )
+          out.push({ info, messages })
+        }
+        return c.json({ sessions: out })
       },
     )
     .get(
