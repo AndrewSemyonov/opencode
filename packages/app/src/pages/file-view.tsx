@@ -4,9 +4,11 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Markdown } from "@opencode-ai/ui/markdown"
 import { isMdxPath, MdxViewer } from "@opencode-ai/ui/mdx"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
+import { showToast } from "@opencode-ai/ui/toast"
 import { getFilename } from "@opencode-ai/shared/util/path"
 import { FileProvider, useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
+import { exportElementToPdf, pdfFilenameFromPath } from "@/pages/session/export-pdf"
 
 function FileView() {
   const params = useParams()
@@ -24,6 +26,25 @@ function FileView() {
   })
 
   const [raw, setRaw] = createSignal(false)
+  const [exporting, setExporting] = createSignal(false)
+  let mdxRoot: HTMLDivElement | undefined
+
+  const handleExportPdf = async () => {
+    if (exporting()) return
+    const root = mdxRoot
+    if (!root) return
+    setExporting(true)
+    try {
+      await exportElementToPdf(root, pdfFilenameFromPath(path()))
+    } catch (err) {
+      showToast({
+        variant: "error",
+        title: err instanceof Error ? err.message : "Failed to export PDF",
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   createEffect(() => {
     const p = path()
@@ -66,23 +87,38 @@ function FileView() {
           <span class="text-12-regular text-text-weak truncate">{path()}</span>
         </Show>
         <Show when={state()?.loaded && isMarkdown()}>
-          <div class="ml-auto flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
-            <IconButton
-              icon="eye"
-              size="small"
-              variant={raw() ? "ghost" : "secondary"}
-              class="size-6 rounded-md"
-              onClick={() => setRaw(false)}
-              aria-label="Preview markdown"
-            />
-            <IconButton
-              icon="code-lines"
-              size="small"
-              variant={raw() ? "secondary" : "ghost"}
-              class="size-6 rounded-md"
-              onClick={() => setRaw(true)}
-              aria-label="Show raw markdown"
-            />
+          <div class="ml-auto flex items-center gap-1">
+            <Show when={isMdx() && !raw()}>
+              <div class="flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
+                <IconButton
+                  icon="download"
+                  size="small"
+                  variant="ghost"
+                  class="size-6 rounded-md"
+                  onClick={handleExportPdf}
+                  disabled={exporting()}
+                  aria-label="Print to PDF"
+                />
+              </div>
+            </Show>
+            <div class="flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
+              <IconButton
+                icon="eye"
+                size="small"
+                variant={raw() ? "ghost" : "secondary"}
+                class="size-6 rounded-md"
+                onClick={() => setRaw(false)}
+                aria-label="Preview markdown"
+              />
+              <IconButton
+                icon="code-lines"
+                size="small"
+                variant={raw() ? "secondary" : "ghost"}
+                class="size-6 rounded-md"
+                onClick={() => setRaw(true)}
+                aria-label="Show raw markdown"
+              />
+            </div>
           </div>
         </Show>
       </div>
@@ -105,7 +141,7 @@ function FileView() {
                   </div>
                 }
               >
-                <div class="px-6 pt-6 pb-40 select-text">
+                <div ref={(el) => (mdxRoot = el)} class="px-6 pt-6 pb-40 select-text">
                   <MdxViewer text={contents()} path={path() || undefined} />
                 </div>
               </Show>
