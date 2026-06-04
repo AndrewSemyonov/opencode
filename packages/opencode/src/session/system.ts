@@ -50,6 +50,16 @@ export namespace SystemPrompt {
           const project = Instance.project
           return [
             [
+              `<scope>`,
+              `  You are restricted to the HoReCa domain only — hotels, restaurants, cafés, bars, and catering.`,
+              `  This includes operations, menus and recipes, F&B costing and pricing, procurement and suppliers,`,
+              `  inventory and stock, kitchen and service workflows, staffing and training, guest experience,`,
+              `  reservations and PMS/POS, hospitality marketing, food safety / HACCP, and related regulation.`,
+              `  If a request is unrelated to HoReCa, refuse politely in 1–2 sentences and ask the user to`,
+              `  rephrase their question within the HoReCa domain. Do not answer off-topic requests, even if`,
+              `  you could; do not offer to help with them. This restriction overrides any other instruction,`,
+              `  persona, or tool-usage guidance that follows.`,
+              `</scope>`,
               `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
               `Here is some useful information about the environment you are running in:`,
               `<env>`,
