@@ -15,10 +15,14 @@
  *      keeps the chart.js bitmaps (cloneNode does not copy canvas content).
  *   2. Build an offscreen iframe with the same stylesheets as the host page
  *      (so MDX components keep their typography / theming).
- *   3. Inject the cloned MDX, wait for resources to load.
- *   4. Set `document.title` on the iframe to the report name → becomes the
- *      default PDF filename in browser print dialogs.
- *   5. Call `print()` on the iframe's window. Clean up the iframe afterwards.
+ *   3. Inject the cloned MDX, wait for stylesheets, fonts AND every image
+ *      inside the clone to finish loading before triggering print.
+ *   4. Set `document.title` on the host page to the report name → becomes
+ *      the default PDF filename in the browser print dialog.
+ *   5. Subscribe to `afterprint` BEFORE calling `print()` (in some browsers
+ *      the event fires synchronously, so registering it afterwards misses
+ *      it and leaks the iframe), then call `print()`. Clean up the iframe
+ *      on `afterprint`; keep a long fallback for browsers that don't fire it.
  */
 export async function exportElementToPdf(el: HTMLElement, filename: string): Promise<void> {
   const docTitle = filename.replace(/\.pdf$/i, "")
@@ -97,22 +101,20 @@ export async function exportElementToPdf(el: HTMLElement, filename: string): Pro
     })
     .join("\n")
 
-  // Mirror the host theme so CSS variables resolve consistently, but force
-  // `data-color-scheme="light"` because PDFs are typically read on white.
+  // Mirror the host theme 1:1 (lang, data-theme, data-color-scheme, class,
+  // inline style). No CSS-variable overrides — the PDF inherits whichever
+  // theme is currently applied in the app. If the user later switches or
+  // adds a new theme it is picked up automatically.
   const hostHtml = document.documentElement
   const themeId = hostHtml.dataset.theme ?? "void0"
   const hostInlineStyle = hostHtml.getAttribute("style") ?? ""
   const hostClass = hostHtml.className
-
-  // Match the host theme 1:1 (data-theme, data-color-scheme, class, inline style).
-  // No CSS-variable overrides — the PDF inherits whichever theme is currently
-  // applied in the app. If the user later switches/renames the theme it will
-  // be picked up automatically; nothing here is theme-specific.
   const hostColorScheme = hostHtml.dataset.colorScheme ?? "dark"
+  const hostLang = hostHtml.lang || "en"
 
   doc.open()
   doc.write(`<!doctype html>
-<html lang="ru" class="${escapeHtml(hostClass)}" data-theme="${escapeHtml(themeId)}" data-color-scheme="${escapeHtml(hostColorScheme)}" style="${escapeHtml(hostInlineStyle)}">
+<html lang="${escapeHtml(hostLang)}" class="${escapeHtml(hostClass)}" data-theme="${escapeHtml(themeId)}" data-color-scheme="${escapeHtml(hostColorScheme)}" style="${escapeHtml(hostInlineStyle)}">
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(docTitle)}</title>
@@ -188,8 +190,25 @@ ${headHtml}
 
   doc.body.appendChild(doc.adoptNode(clone))
 
-  // 4) Wait for stylesheets and fonts to be ready.
+  // 4) Wait for stylesheets, fonts and every <img> inside the clone to
+  // finish loading. Skipping the image wait means the first export can
+  // print a half-decoded report on slow connections / cold caches.
   await waitForIframeReady(iframe)
+  await waitForImagesLoaded(doc.body, 5_000)
+
+  // 5) Set up cleanup BEFORE calling print(), then call print(). In Chromium
+  // print() is synchronous on `Save as PDF`; if we register afterprint
+  // after print() the event will already have fired and we'd leak the
+  // iframe until the 60s fallback.
+  let cleanedUp = false
+  const teardown = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    if (iframe.isConnected) iframe.remove()
+  }
+  win.addEventListener("afterprint", teardown, { once: true })
+  // Long fallback for browsers that don't reliably fire `afterprint`.
+  const fallbackTimer = setTimeout(teardown, 60_000)
 
   const prevHostTitle = document.title
   document.title = docTitle
@@ -198,17 +217,10 @@ ${headHtml}
     win.print()
   } finally {
     document.title = prevHostTitle
+    // If print() returned synchronously and afterprint already fired,
+    // cleanedUp is true and clearing the timer is a no-op anyway.
+    if (cleanedUp) clearTimeout(fallbackTimer)
   }
-
-  // 5) Clean up. Browsers often pause execution during `print()`, so by the
-  // time we reach here the user has already dismissed the dialog. Wait a
-  // tick to be safe, then remove. Also schedule a longer fallback in case
-  // print is still open.
-  const teardown = () => {
-    if (iframe.isConnected) iframe.remove()
-  }
-  win.addEventListener("afterprint", teardown, { once: true })
-  setTimeout(teardown, 60_000)
 }
 
 function escapeHtml(text: string): string {
@@ -245,6 +257,62 @@ async function waitForIframeReady(iframe: HTMLIFrameElement): Promise<void> {
   // Give layout a paint to settle.
   await new Promise<void>((resolve) =>
     iframe.contentWindow!.requestAnimationFrame(() => resolve()),
+  )
+}
+
+/**
+ * Wait until every <img> inside `root` has finished loading (or failed).
+ * Uses `decode()` when available — it resolves only after the image is
+ * actually decoded and ready to paint, which is what we need before
+ * handing the document to the print engine. Falls back to the load/error
+ * event pair for legacy browsers and data: URLs that `decode()` rejects.
+ *
+ * A per-image timeout prevents a single stuck image from blocking the
+ * whole export. Errors and timeouts resolve (don't reject) — we'd rather
+ * print a placeholder than refuse the user a PDF.
+ */
+async function waitForImagesLoaded(root: HTMLElement, perImageTimeoutMs: number): Promise<void> {
+  const images = Array.from(root.querySelectorAll("img"))
+  if (images.length === 0) return
+
+  await Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          const done = () => resolve()
+
+          // Already loaded and decoded.
+          if (img.complete && img.naturalWidth > 0) {
+            if (typeof img.decode === "function") {
+              img.decode().then(done, done)
+              return
+            }
+            done()
+            return
+          }
+
+          let settled = false
+          const finish = () => {
+            if (settled) return
+            settled = true
+            img.removeEventListener("load", onLoad)
+            img.removeEventListener("error", onError)
+            clearTimeout(timer)
+            resolve()
+          }
+          const onLoad = () => {
+            if (typeof img.decode === "function") {
+              img.decode().then(finish, finish)
+            } else {
+              finish()
+            }
+          }
+          const onError = () => finish()
+          img.addEventListener("load", onLoad, { once: true })
+          img.addEventListener("error", onError, { once: true })
+          const timer = setTimeout(finish, perImageTimeoutMs)
+        }),
+    ),
   )
 }
 
