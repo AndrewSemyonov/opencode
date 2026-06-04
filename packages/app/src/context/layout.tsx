@@ -647,10 +647,23 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             next[sessionId] = skillName
             const ids = Object.keys(next)
             if (ids.length > 200) {
+              // Session IDs use Identifier.descending — newer sessions get
+              // lexicographically smaller IDs. Ascending sort puts newest
+              // first; keep the first 200 (newest) and drop the rest.
               ids.sort()
-              for (const id of ids.slice(0, ids.length - 200)) delete next[id]
+              for (const id of ids.slice(200)) delete next[id]
             }
             return next
+          })
+        },
+        unmarkReportSession(directory: string, sessionId: string) {
+          if (!sessionId) return
+          const key = workspaceKey(directory)
+          if (!store.reportSessions[key]?.[sessionId]) return
+          setStore("reportSessions", key, (prev) => {
+            if (!prev || !(sessionId in prev)) return prev ?? {}
+            const { [sessionId]: _drop, ...rest } = prev
+            return rest
           })
         },
       },

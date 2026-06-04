@@ -195,9 +195,6 @@ export function previewablePath(href: string): string | undefined {
 
   if (!PREVIEWABLE_FILE_EXTENSIONS.has(ext)) return
 
-  const normalized = path.replace(/^\.\//, "").replace(/^\/+/, "")
-  if (!/(?:^|\/)reports\/[^/]/.test(normalized)) return
-
   if (!line) return path
   return `${path}?start=${line}&end=${line}`
 }

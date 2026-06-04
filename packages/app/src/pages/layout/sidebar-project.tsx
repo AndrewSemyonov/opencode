@@ -223,6 +223,7 @@ export const SortableProject = (props: {
   sortNow: Accessor<number>
 }): JSX.Element => {
   const globalSync = useGlobalSync()
+  const layout = useLayout()
   const language = useLanguage()
   const sortable = createSortable(props.project.worktree)
   const selected = createMemo(() => props.ctx.currentProject()?.worktree === props.project.worktree)
@@ -241,10 +242,16 @@ export const SortableProject = (props: {
   const hoverOpen = () => isHoverProject() && preview() && !selected() && !state.menu
 
   const projectStore = createMemo(() => globalSync.child(props.project.worktree, { bootstrap: false })[0])
-  const projectSessions = createMemo(() => sortedRootSessions(projectStore(), props.sortNow()))
+  const projectSessions = createMemo(() =>
+    sortedRootSessions(
+      projectStore(),
+      props.sortNow(),
+      layout.reportSessions.reportSessionIds(props.project.worktree),
+    ),
+  )
   const workspaceSessions = (directory: string) => {
     const [data] = globalSync.child(directory, { bootstrap: false })
-    return sortedRootSessions(data, props.sortNow())
+    return sortedRootSessions(data, props.sortNow(), layout.reportSessions.reportSessionIds(directory))
   }
   const tile = () => (
     <ProjectTile

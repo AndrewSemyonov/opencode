@@ -46,9 +46,8 @@ import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
 import {
   expectedReportPath,
-  extractReportPathFromText,
   findLatestReportPath,
-  isReportFileForSkill,
+  findReportSkillForFile,
   isReportSkill,
   reportSkillCommands,
   reportSkillSignatures,
@@ -420,16 +419,25 @@ export default function Page() {
         const ws = workspaceTabs()
         const cur = ws.tabs()
         const isReport = (t: string) => {
-          const p = decodeURIComponent(t.replace(/^file:\/\//, ""))
-            .replace(/^\.\//, "")
-            .replace(/^\/+/, "")
+          const stripped = t.replace(/^file:\/\//, "")
+          let decoded: string
+          try {
+            decoded = decodeURIComponent(stripped)
+          } catch {
+            // Malformed percent-escape in a persisted tab; treat as not a
+            // report rather than killing the whole eviction effect.
+            decoded = stripped
+          }
+          const p = decoded.replace(/^\.\//, "").replace(/^\/+/, "")
           return /(?:^|\/)reports\/[^/]/.test(p)
         }
         const kept = cur.all.filter((t) => !isReport(t))
         const activeIsReport = !!cur.active && isReport(cur.active)
         if (kept.length === cur.all.length && !activeIsReport) return
-        ws.setAll(kept)
-        ws.setActive(activeIsReport ? kept[kept.length - 1] : cur.active)
+        batch(() => {
+          ws.setAll(kept)
+          ws.setActive(activeIsReport ? kept[kept.length - 1] : cur.active)
+        })
       },
     ),
   )
@@ -528,37 +536,30 @@ export default function Page() {
     if (!id) return undefined
     return findLatestReportPath(sync.data.message[id], sync.data.part, reportSignature())
   })
-  const hasReport = createMemo(() => {
-    const id = params.id
-    if (!id || !reportInvoked()) return false
-    const messages = sync.data.message[id]
-    if (!messages || messages.length === 0) return false
-    const parts = sync.data.part ?? {}
-    for (const msg of messages) {
-      if (msg.role !== "assistant") continue
-      if (typeof msg.time?.completed !== "number") continue
-      const partList = parts[msg.id] ?? []
-      let text = ""
-      for (const p of partList) if (p.type === "text") text += p.text + "\n"
-      if (extractReportPathFromText(text)) return true
-    }
-    return false
-  })
+  // Derive hasReport from latestReportPath so the two memos can't disagree.
+  // latestReportPath already gates on reportSignature (skill aliases match a
+  // prior user message), which is what we want for "this session has a real
+  // report" — bare assistant mentions of `reports/foo.mdx` no longer
+  // false-positive into the UI.
+  const hasReport = createMemo(() => reportInvoked() && !!latestReportPath())
   createEffect(
-    on(latestReportPath, (path, prev) => {
-      const id = params.id
-      if (!path || !id) {
-        const pending = peekPendingFileOpen()
-        if (pending?.kind === "report" && pending.sessionId && pending.sessionId !== id) {
-          consumePendingFileOpen()
+    on(
+      [latestReportPath, () => params.id],
+      ([path, id], prev) => {
+        const prevPath = prev?.[0]
+        if (!path || !id) {
+          const pending = peekPendingFileOpen()
+          if (pending?.kind === "report" && pending.sessionId && pending.sessionId !== id) {
+            consumePendingFileOpen()
+          }
+          return
         }
-        return
-      }
-      const skill = reportSkills().find((s) => isReportFileForSkill(path, s.name))
-      if (skill) layout.reportSessions.markReportSession(sdk.directory, id, skill.name)
-      if (path === prev) return
-      requestOpenFile({ kind: "report", path, sessionId: id })
-    }),
+        const skill = findReportSkillForFile(reportSkills(), path)
+        if (skill) layout.reportSessions.markReportSession(sdk.directory, id, skill.name)
+        if (path === prevPath) return
+        requestOpenFile({ kind: "report", path, sessionId: id })
+      },
+    ),
   )
   const [generatingReport, setGeneratingReport] = createSignal(false)
   const generateReport = async (skillName: string) => {

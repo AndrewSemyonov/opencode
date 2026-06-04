@@ -22,10 +22,24 @@
  *   5. Subscribe to `afterprint` BEFORE calling `print()` (in some browsers
  *      the event fires synchronously, so registering it afterwards misses
  *      it and leaks the iframe), then call `print()`. Clean up the iframe
- *      on `afterprint`; keep a long fallback for browsers that don't fire it.
+ *      on `afterprint`. If `afterprint` ever fails to fire, the orphan
+ *      iframe is swept at the start of the next print — a timer here would
+ *      otherwise tear the iframe down mid-dialog if the user lingered in
+ *      Save-as-PDF longer than the timeout.
  */
+const PDF_IFRAME_MARKER = "opencode-pdf-export"
+
 export async function exportElementToPdf(el: HTMLElement, filename: string): Promise<void> {
   const docTitle = filename.replace(/\.pdf$/i, "")
+
+  // Sweep iframes left over from prior prints where `afterprint` never
+  // fired. Defence in depth instead of a timer — caps the leak at one
+  // orphan in the DOM at any time without risking a mid-dialog teardown.
+  for (const orphan of document.querySelectorAll<HTMLIFrameElement>(
+    `iframe[data-purpose="${PDF_IFRAME_MARKER}"]`,
+  )) {
+    orphan.remove()
+  }
 
   // 1) Snapshot canvases (charts) before cloning — bitmaps are not cloneable.
   const canvasSnapshots = new Map<HTMLCanvasElement, string>()
@@ -71,6 +85,7 @@ export async function exportElementToPdf(el: HTMLElement, filename: string): Pro
   // 3) Build the iframe.
   const iframe = document.createElement("iframe")
   iframe.setAttribute("aria-hidden", "true")
+  iframe.dataset.purpose = PDF_IFRAME_MARKER
   iframe.style.cssText = [
     "position: fixed",
     "left: -99999px",
@@ -83,37 +98,52 @@ export async function exportElementToPdf(el: HTMLElement, filename: string): Pro
   ].join("; ")
   document.body.appendChild(iframe)
 
-  const doc = iframe.contentDocument
-  const win = iframe.contentWindow
-  if (!doc || !win) {
-    iframe.remove()
-    throw new Error("Failed to create print iframe")
+  // Wire teardown immediately so any throw between here and print() doesn't
+  // leak the iframe. `cleanedUp` plus the `isConnected` check makes teardown
+  // safely idempotent across afterprint and the error path below.
+  let cleanedUp = false
+  const teardown = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    if (iframe.isConnected) iframe.remove()
   }
 
-  const headHtml = styleNodes
-    .map((node) => {
-      if (node.tagName === "LINK") {
-        const link = node as HTMLLinkElement
-        return `<link rel="stylesheet" href="${link.href}">`
-      }
-      const styleEl = node as HTMLStyleElement
-      return `<style>${styleEl.textContent ?? ""}</style>`
-    })
-    .join("\n")
+  try {
+    const doc = iframe.contentDocument
+    const win = iframe.contentWindow
+    if (!doc || !win) {
+      teardown()
+      throw new Error("Failed to create print iframe")
+    }
 
-  // Mirror the host theme 1:1 (lang, data-theme, data-color-scheme, class,
-  // inline style). No CSS-variable overrides — the PDF inherits whichever
-  // theme is currently applied in the app. If the user later switches or
-  // adds a new theme it is picked up automatically.
-  const hostHtml = document.documentElement
-  const themeId = hostHtml.dataset.theme ?? "void0"
-  const hostInlineStyle = hostHtml.getAttribute("style") ?? ""
-  const hostClass = hostHtml.className
-  const hostColorScheme = hostHtml.dataset.colorScheme ?? "dark"
-  const hostLang = hostHtml.lang || "en"
+    const headHtml = styleNodes
+      .map((node) => {
+        if (node.tagName === "LINK") {
+          const link = node as HTMLLinkElement
+          return `<link rel="stylesheet" href="${link.href}">`
+        }
+        const styleEl = node as HTMLStyleElement
+        // Escape any literal `</style>` inside the CSS text (CSS comments,
+        // injected source maps) so the iframe HTML parser doesn't terminate
+        // the style tag early. Backslash before `/` keeps the CSS valid.
+        const css = (styleEl.textContent ?? "").replace(/<\/style/gi, "<\\/style")
+        return `<style>${css}</style>`
+      })
+      .join("\n")
 
-  doc.open()
-  doc.write(`<!doctype html>
+    // Mirror the host theme 1:1 (lang, data-theme, data-color-scheme, class,
+    // inline style). No CSS-variable overrides — the PDF inherits whichever
+    // theme is currently applied in the app. If the user later switches or
+    // adds a new theme it is picked up automatically.
+    const hostHtml = document.documentElement
+    const themeId = hostHtml.dataset.theme ?? "void0"
+    const hostInlineStyle = hostHtml.getAttribute("style") ?? ""
+    const hostClass = hostHtml.className
+    const hostColorScheme = hostHtml.dataset.colorScheme ?? "dark"
+    const hostLang = hostHtml.lang || "en"
+
+    doc.open()
+    doc.write(`<!doctype html>
 <html lang="${escapeHtml(hostLang)}" class="${escapeHtml(hostClass)}" data-theme="${escapeHtml(themeId)}" data-color-scheme="${escapeHtml(hostColorScheme)}" style="${escapeHtml(hostInlineStyle)}">
 <head>
 <meta charset="utf-8">
@@ -186,40 +216,37 @@ ${headHtml}
 </head>
 <body></body>
 </html>`)
-  doc.close()
+    doc.close()
 
-  doc.body.appendChild(doc.adoptNode(clone))
+    doc.body.appendChild(doc.adoptNode(clone))
 
-  // 4) Wait for stylesheets, fonts and every <img> inside the clone to
-  // finish loading. Skipping the image wait means the first export can
-  // print a half-decoded report on slow connections / cold caches.
-  await waitForIframeReady(iframe)
-  await waitForImagesLoaded(doc.body, 5_000)
+    // 4) Wait for stylesheets, fonts and every <img> inside the clone to
+    // finish loading. Skipping the image wait means the first export can
+    // print a half-decoded report on slow connections / cold caches.
+    await waitForIframeReady(iframe)
+    await waitForImagesLoaded(doc.body, 5_000)
 
-  // 5) Set up cleanup BEFORE calling print(), then call print(). In Chromium
-  // print() is synchronous on `Save as PDF`; if we register afterprint
-  // after print() the event will already have fired and we'd leak the
-  // iframe until the 60s fallback.
-  let cleanedUp = false
-  const teardown = () => {
-    if (cleanedUp) return
-    cleanedUp = true
-    if (iframe.isConnected) iframe.remove()
-  }
-  win.addEventListener("afterprint", teardown, { once: true })
-  // Long fallback for browsers that don't reliably fire `afterprint`.
-  const fallbackTimer = setTimeout(teardown, 60_000)
+    // 5) Register afterprint BEFORE print(). In Firefox/Safari `print()` is
+    // async — restoring the host title in a `finally` block races the
+    // dialog, which then suggests the host-page title as the PDF filename.
+    // Restoring inside `afterprint` keeps the doc title in place until the
+    // browser has actually read it for the filename suggestion.
+    const prevHostTitle = document.title
+    win.addEventListener(
+      "afterprint",
+      () => {
+        if (document.title === docTitle) document.title = prevHostTitle
+        teardown()
+      },
+      { once: true },
+    )
 
-  const prevHostTitle = document.title
-  document.title = docTitle
-  try {
+    document.title = docTitle
     win.focus()
     win.print()
-  } finally {
-    document.title = prevHostTitle
-    // If print() returned synchronously and afterprint already fired,
-    // cleanedUp is true and clearing the timer is a no-op anyway.
-    if (cleanedUp) clearTimeout(fallbackTimer)
+  } catch (err) {
+    teardown()
+    throw err
   }
 }
 
@@ -254,10 +281,12 @@ async function waitForIframeReady(iframe: HTMLIFrameElement): Promise<void> {
   } catch {
     // ignore
   }
-  // Give layout a paint to settle.
-  await new Promise<void>((resolve) =>
-    iframe.contentWindow!.requestAnimationFrame(() => resolve()),
-  )
+  // Give layout a paint to settle. Guard against the iframe being detached
+  // between awaits — contentWindow becomes null and a non-null assertion
+  // would throw before the outer teardown can run.
+  const win = iframe.contentWindow
+  if (!win) return
+  await new Promise<void>((resolve) => win.requestAnimationFrame(() => resolve()))
 }
 
 /**

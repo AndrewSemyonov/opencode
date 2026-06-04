@@ -114,7 +114,19 @@ export function applyDirectoryEvent(input: {
       const trimmed = trimSessions(next, { limit: input.store.limit, permission: input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
-      if (!info.parentID) input.setStore("sessionTotal", (value) => value + 1)
+      if (!info.parentID) {
+        input.setStore("sessionTotal", (value) => value + 1)
+        // hasMore is the sole gate for the sidebar "Load more" button after
+        // this PR. The initial load wires it via session.list, but new
+        // sessions arriving via the event channel could otherwise leave it
+        // stale at false even though we've grown past the visible window.
+        // If the new state has more non-archived roots than limit, flip on.
+        const limit = input.store.limit
+        if (limit && limit > 0) {
+          const visibleRoots = next.filter((s) => !s.parentID && !s.time?.archived).length
+          if (visibleRoots > limit) input.setStore("hasMore", true)
+        }
+      }
       break
     }
     case "session.updated": {
