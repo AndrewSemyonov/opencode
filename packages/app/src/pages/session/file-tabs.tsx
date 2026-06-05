@@ -21,6 +21,7 @@ import { usePrompt } from "@/context/prompt"
 import { getSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { exportElementToPdf, pdfFilenameFromPath } from "@/pages/session/export-pdf"
 
 function FileCommentMenu(props: {
   moreLabel: string
@@ -206,7 +207,27 @@ export function FileTabContent(props: {
   const contents = createMemo(() => state()?.content?.content ?? "")
   const cacheKey = createMemo(() => sampledChecksum(contents()))
   const md = createMemo(() => /\.(md|markdown|mdx)$/i.test(path() ?? ""))
+  const isMdx = createMemo(() => isMdxPath(path() ?? undefined))
   const [raw, setRaw] = createSignal(false)
+  const [exporting, setExporting] = createSignal(false)
+  let mdxRoot: HTMLDivElement | undefined
+
+  const handleExportPdf = async () => {
+    if (exporting()) return
+    const root = mdxRoot
+    if (!root) return
+    setExporting(true)
+    try {
+      await exportElementToPdf(root, pdfFilenameFromPath(path()))
+    } catch (err) {
+      showToast({
+        variant: "error",
+        title: err instanceof Error ? err.message : "Failed to export PDF",
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
   const selectedLines = createMemo<SelectedLineRange | null>(() => {
     const p = path()
     if (!p) return null
@@ -410,7 +431,7 @@ export function FileTabContent(props: {
   })
 
   const renderMdx = (source: string) => (
-    <div class="relative overflow-hidden pb-40">
+    <div ref={(el) => (mdxRoot = el)} class="relative overflow-hidden pb-40">
       <MdxViewer text={source} path={path() ?? undefined} />
     </div>
   )
@@ -479,7 +500,20 @@ export function FileTabContent(props: {
     <Tabs.Content value={props.tab} class="mt-3 relative h-full min-h-0 flex flex-col overflow-hidden contain-strict">
       <Switch>
         <Match when={state()?.loaded && md()}>
-          <div class="px-4 pb-2 flex justify-end shrink-0">
+          <div class="px-4 pb-2 flex justify-end shrink-0 gap-1">
+            <Show when={isMdx() && !raw()}>
+              <div class="flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
+                <IconButton
+                  icon="download"
+                  size="small"
+                  variant="ghost"
+                  class="size-6 rounded-md"
+                  onClick={handleExportPdf}
+                  disabled={exporting()}
+                  aria-label="Print to PDF"
+                />
+              </div>
+            </Show>
             <div class="flex items-center gap-1 rounded-md border border-border-weak bg-background-stronger p-0.5">
               <IconButton
                 icon="eye"

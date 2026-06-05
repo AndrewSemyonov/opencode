@@ -5,6 +5,7 @@ import {
   extractReportPathFromText,
   extractSessionIdFromReport,
   findLatestReportPath,
+  findReportSkillForFile,
   findSessionIdByReportPath,
   hasReportInvocation,
   isReportSkill,
@@ -350,5 +351,36 @@ describe("findLatestReportPath", () => {
       a1: [textPart("p2", "a1", "no path here")],
     }
     expect(findLatestReportPath(messages, parts, ["report"])).toBeUndefined()
+  })
+})
+
+describe("findReportSkillForFile", () => {
+  it("returns undefined when no skill matches", () => {
+    const skills = [{ name: "report" }, { name: "summary" }]
+    expect(findReportSkillForFile(skills, "reports/other-2026-05-19.mdx")).toBeUndefined()
+  })
+
+  it("picks the longest-name skill on prefix collision", () => {
+    // `report-weekly-x.mdx` matches both regexes; longest skill wins.
+    const skills = [{ name: "report" }, { name: "report-weekly" }]
+    expect(findReportSkillForFile(skills, "reports/report-weekly-2026-05-19.mdx")?.name).toBe("report-weekly")
+  })
+
+  it("order of skills does not matter", () => {
+    const a = [{ name: "report" }, { name: "report-weekly" }]
+    const b = [{ name: "report-weekly" }, { name: "report" }]
+    expect(findReportSkillForFile(a, "reports/report-weekly.mdx")?.name).toBe("report-weekly")
+    expect(findReportSkillForFile(b, "reports/report-weekly.mdx")?.name).toBe("report-weekly")
+  })
+
+  it("returns the only matching skill when no collision", () => {
+    const skills = [{ name: "report" }, { name: "summary" }]
+    expect(findReportSkillForFile(skills, "reports/report-2026-05-19.mdx")?.name).toBe("report")
+  })
+
+  it("handles empty / nullish skill lists", () => {
+    expect(findReportSkillForFile([], "reports/x.mdx")).toBeUndefined()
+    expect(findReportSkillForFile(undefined, "reports/x.mdx")).toBeUndefined()
+    expect(findReportSkillForFile(null, "reports/x.mdx")).toBeUndefined()
   })
 })

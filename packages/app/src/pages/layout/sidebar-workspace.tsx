@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@solidjs/router"
-import { createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, For, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createSortable } from "@thisbeyond/solid-dnd"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -28,8 +28,8 @@ import {
   expectedReportPath,
   extractSessionIdFromReport,
   findLatestReportFileForSkill,
+  findReportSkillForFile,
   findSessionIdByReportPath,
-  isReportFileForSkill,
   reportSkillCommands,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
@@ -357,22 +357,39 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     navigate(`/${slug()}/session/${created}`)
   }
 
+  let backfillInflight = false
+  let backfillToken = 0
+  onCleanup(() => {
+    backfillToken++ // any in-flight pass becomes a no-op
+  })
   createEffect(() => {
     if (sync.data.command.length === 0) return
     const list = skills()
     if (list.length === 0) return
+    if (backfillInflight) return // another pass is already running; skip
+    backfillInflight = true
+    const token = ++backfillToken
     void (async () => {
-      let files: Awaited<ReturnType<typeof sdk.client.file.list>>["data"]
       try {
-        files = (await sdk.client.file.list({ path: "reports" })).data
-      } catch {
-        return
-      }
-      for (const skill of list) {
-        const file = findLatestReportFileForSkill(files, skill.name)
-        if (!file) continue
-        const sid = await resolveReportSessionId(sdk, sync, file)
-        if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
+        let files: Awaited<ReturnType<typeof sdk.client.file.list>>["data"]
+        try {
+          files = (await sdk.client.file.list({ path: "reports" })).data
+        } catch {
+          return
+        }
+        // If a newer pass started or the component unmounted, drop results.
+        if (token !== backfillToken) return
+        await Promise.all(
+          list.map(async (skill) => {
+            const file = findLatestReportFileForSkill(files, skill.name)
+            if (!file) return
+            const sid = await resolveReportSessionId(sdk, sync, file)
+            if (token !== backfillToken) return
+            if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
+          }),
+        )
+      } finally {
+        backfillInflight = false
       }
     })()
   })
@@ -428,7 +445,7 @@ const WorkspaceFileTreeBody = (props: {
   const slug = createMemo(() => base64Encode(props.directory))
 
   const skillForReportFile = (filePath: string): string | undefined =>
-    reportSkillCommands(sync.data.command).find((cmd) => isReportFileForSkill(filePath, cmd.name))?.name
+    findReportSkillForFile(reportSkillCommands(sync.data.command), filePath)?.name
 
   const openFromTree = async (filePath: string) => {
     if (props.kind === "file") {
@@ -442,10 +459,13 @@ const WorkspaceFileTreeBody = (props: {
     if (target) {
       const skillName = skillForReportFile(filePath)
       if (skillName) layout.reportSessions.markReportSession(props.directory, target, skillName)
+      requestOpenFile({ kind: "report", path: filePath, sessionId: target })
+      navigate(`/${slug()}/session/${target}`)
+      return
     }
-    requestOpenFile({ kind: "report", path: filePath, sessionId: target })
-    if (target) navigate(`/${slug()}/session/${target}`)
-    else navigate(`/${slug()}/session`)
+    // No originating session — fall back to opening the file standalone so
+    // the side-panel `kind === "report" && !params.id` guard doesn't drop it.
+    navigate(`/${slug()}/file/${encodeURIComponent(filePath)}`)
   }
 
   return (
@@ -575,8 +595,19 @@ export const SortableWorkspace = (props: {
   const touch = createMediaQuery("(hover: none)")
   const showNew = createMemo(() => !loading() && (touch() || count() === 0 || (active() && !params.id)))
   const loadMore = async () => {
-    setWorkspaceStore("limit", (limit) => (limit ?? 0) + 5)
-    await globalSync.project.loadSessions(props.directory)
+    // hasMore reflects raw server rows, but the visible list filters out
+    // report sessions. A page can consist entirely of reports → count
+    // doesn't grow even though hasMore stays true. Keep paging until either
+    // the filtered count advances or the server runs out, with a safety cap
+    // so we never page indefinitely.
+    const MAX_AUTO_PAGES = 5
+    const initial = count()
+    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
+      setWorkspaceStore("limit", (limit) => (limit ?? 0) + 5)
+      await globalSync.project.loadSessions(props.directory)
+      if (!workspaceStore.hasMore) return
+      if (count() > initial) return
+    }
   }
 
   const workspaceEditActive = createMemo(() => props.ctx.editorOpen(`workspace:${props.directory}`))
@@ -734,8 +765,17 @@ export const LocalWorkspace = (props: {
   const loading = createMemo(() => !booted() && count() === 0)
   const hasMore = createMemo(() => workspace().store.hasMore)
   const loadMore = async () => {
-    workspace().setStore("limit", (limit) => (limit ?? 0) + 5)
-    await globalSync.project.loadSessions(props.project.worktree)
+    // See SortableWorkspace.loadMore — keep paging while filtered count
+    // stagnates so a stretch of report sessions can't strand the user with
+    // an infinitely-clicking "Load more" button.
+    const MAX_AUTO_PAGES = 5
+    const initial = count()
+    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
+      workspace().setStore("limit", (limit) => (limit ?? 0) + 5)
+      await globalSync.project.loadSessions(props.project.worktree)
+      if (!workspace().store.hasMore) return
+      if (count() > initial) return
+    }
   }
 
   return (

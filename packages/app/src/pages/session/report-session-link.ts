@@ -21,6 +21,22 @@ export const isReportFileForSkill = (path: string, skillName: string): boolean =
   return reportFileRegex(skillName).test(name)
 }
 
+// Prefer the longest skill name on tie — `report-weekly-x.mdx` matches both
+// `report` and `report-weekly`; without this preference the alphabetically
+// first skill wins and the wrong session gets labelled.
+export const findReportSkillForFile = <T extends { name: string }>(
+  skills: T[] | null | undefined,
+  filePath: string,
+): T | undefined => {
+  if (!skills || skills.length === 0) return undefined
+  let best: T | undefined
+  for (const skill of skills) {
+    if (!isReportFileForSkill(filePath, skill.name)) continue
+    if (!best || skill.name.length > best.name.length) best = skill
+  }
+  return best
+}
+
 export const findLatestReportFileForSkill = (
   files: FileListEntry[] | null | undefined,
   skillName: string,

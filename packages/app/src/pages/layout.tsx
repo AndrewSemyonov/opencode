@@ -657,7 +657,7 @@ export default function Layout(props: ParentProps) {
     const result: Session[] = []
     for (const dir of dirs) {
       const [dirStore] = globalSync.child(dir, { bootstrap: true })
-      const dirSessions = sortedRootSessions(dirStore, now)
+      const dirSessions = sortedRootSessions(dirStore, now, layout.reportSessions.reportSessionIds(dir))
       result.push(...dirSessions)
     }
     return result
@@ -1275,9 +1275,15 @@ export default function Layout(props: ParentProps) {
       clearLastProjectSession(root)
     }
 
+    const reportIds = new Set<string>()
+    for (const dir of dirs) {
+      for (const id of layout.reportSessions.reportSessionIds(dir)) reportIds.add(id)
+    }
+
     const latest = latestRootSession(
       dirs.map((item) => globalSync.child(item, { bootstrap: false })[0]),
       Date.now(),
+      reportIds,
     )
     if (latest && (await openSession(latest))) {
       return
@@ -1294,6 +1300,7 @@ export default function Layout(props: ParentProps) {
         })),
       ),
       Date.now(),
+      reportIds,
     )
     if (fetched && (await openSession(fetched))) {
       return
@@ -2022,7 +2029,7 @@ export default function Layout(props: ParentProps) {
           const sessions: Session[] = []
           for (const dir of dirs) {
             const [dirStore] = globalSync.child(dir, { bootstrap: false })
-            for (const s of sortedRootSessions(dirStore, now)) {
+            for (const s of sortedRootSessions(dirStore, now, layout.reportSessions.reportSessionIds(dir))) {
               if (seen.has(s.id)) continue
               if (matchesQuery(s)) {
                 seen.add(s.id)
