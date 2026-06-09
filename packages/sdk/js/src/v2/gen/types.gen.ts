@@ -2125,6 +2125,7 @@ export type Command = {
   title?: string
   description?: string
   aliases?: Array<string>
+  category?: string
   agent?: string
   model?: string
   source?: "command" | "mcp" | "skill"
@@ -5423,6 +5424,7 @@ export type AppSkillsResponses = {
     title?: string
     description: string
     aliases?: Array<string>
+    category?: string
     location: string
     content: string
   }>

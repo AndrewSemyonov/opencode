@@ -29,6 +29,7 @@ export namespace Skill {
     title: z.string().optional(),
     description: z.string(),
     aliases: z.array(z.string()).optional(),
+    category: z.string().trim().toLowerCase().min(1).optional(),
     location: z.string(),
     content: z.string(),
   })
@@ -85,7 +86,13 @@ export namespace Skill {
 
     if (!md) return
 
-    const parsed = Info.pick({ name: true, title: true, description: true, aliases: true }).safeParse(md.data)
+    const parsed = Info.pick({
+      name: true,
+      title: true,
+      description: true,
+      aliases: true,
+      category: true,
+    }).safeParse(md.data)
     if (!parsed.success) return
 
     if (state.skills[parsed.data.name]) {
@@ -113,6 +120,7 @@ export namespace Skill {
       title: parsed.data.title,
       description: parsed.data.description,
       aliases,
+      category: parsed.data.category,
       location: match,
       content: md.content,
     }

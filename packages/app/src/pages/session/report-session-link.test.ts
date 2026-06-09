@@ -81,6 +81,10 @@ const cmd = (input: Partial<Command> & Pick<Command, "name">): Command => ({
 })
 
 describe("isReportSkill", () => {
+  it("matches by explicit category", () => {
+    expect(isReportSkill({ name: "guests-yesterday-vs-plan", category: "report" })).toBe(true)
+  })
+
   it("matches by name", () => {
     expect(isReportSkill({ name: "report" })).toBe(true)
   })
@@ -101,10 +105,18 @@ describe("isReportSkill", () => {
 })
 
 describe("reportSkillCommands", () => {
-  it("filters by source=skill and report-matching name", () => {
+  it("filters by source=skill and explicit report category", () => {
+    const out = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Гости вчера vs план", category: "report", source: "skill" }),
+      cmd({ name: "guests-yesterday-vs-plan", title: "Other", category: "report", source: "command" }),
+      cmd({ name: "help", source: "skill" }),
+    ])
+    expect(out.map((s) => s.name)).toEqual(["guests-yesterday-vs-plan"])
+  })
+
+  it("keeps regex fallback for older report skills", () => {
     const out = reportSkillCommands([
       cmd({ name: "report", title: "Отчёт", source: "skill" }),
-      cmd({ name: "report", title: "Other", source: "command" }),
       cmd({ name: "help", source: "skill" }),
     ])
     expect(out.map((s) => s.name)).toEqual(["report"])

@@ -38,6 +38,7 @@ export namespace Command {
       title: z.string().optional(),
       description: z.string().optional(),
       aliases: z.array(z.string()).optional(),
+      category: z.string().optional(),
       agent: z.string().optional(),
       model: z.string().optional(),
       source: z.enum(["command", "mcp", "skill"]).optional(),
@@ -160,6 +161,7 @@ export namespace Command {
             title: item.title,
             description: item.description,
             aliases: item.aliases,
+            category: item.category,
             source: "skill",
             get template() {
               return item.content

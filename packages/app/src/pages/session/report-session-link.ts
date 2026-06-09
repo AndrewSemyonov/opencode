@@ -3,8 +3,12 @@ import type { Command, Message, Part } from "@opencode-ai/sdk/v2/client"
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/
 const SESSION_ID_LINE_RE = /^\s*sessionId\s*:\s*(.+?)\s*$/im
 const REPORT_SKILL_RE = /report|отч[еёЕЁ]т/i
+const REPORT_SKILL_CATEGORY = "report"
 
-export type ReportSkillCommand = Pick<Command, "name" | "title" | "description" | "aliases" | "source" | "template">
+export type ReportSkillCommand = Pick<
+  Command,
+  "name" | "title" | "description" | "aliases" | "category" | "source" | "template"
+>
 
 export const expectedReportPath = (reportName: string): string => `reports/${reportName}.mdx`
 
@@ -51,7 +55,13 @@ export const findLatestReportFileForSkill = (
   return matches.at(-1)
 }
 
-export const isReportSkill = (cmd: { name: string; title?: string | null; aliases?: string[] | null }): boolean => {
+export const isReportSkill = (cmd: {
+  name: string
+  title?: string | null
+  aliases?: string[] | null
+  category?: string | null
+}): boolean => {
+  if (cmd.category === REPORT_SKILL_CATEGORY) return true
   const candidates = [cmd.name, cmd.title ?? "", ...(cmd.aliases ?? [])]
   return candidates.some((value) => REPORT_SKILL_RE.test(value))
 }
@@ -65,6 +75,7 @@ export const reportSkillCommands = (commands: Command[] | undefined | null): Rep
       title: cmd.title ?? cmd.name,
       description: cmd.description,
       aliases: cmd.aliases ?? [],
+      category: cmd.category,
       source: cmd.source,
       template: cmd.template ?? "",
     }))

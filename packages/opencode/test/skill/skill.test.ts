@@ -108,6 +108,33 @@ aliases:
     ),
   )
 
+  it.live("discovers skill category", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, ".opencode", "skill", "hotel-report", "SKILL.md"),
+              `---
+name: hotel-report
+description: Report skill with explicit category.
+category: report
+---
+
+# Hotel Report
+`,
+            ),
+          )
+
+          const skill = yield* Skill.Service
+          const list = yield* skill.all()
+          expect(list.length).toBe(1)
+          expect(list[0].category).toBe("report")
+        }),
+      { git: true },
+    ),
+  )
+
   it.live("ignores invalid and duplicate skill aliases", () =>
     provideTmpdirInstance(
       (dir) =>
@@ -499,8 +526,38 @@ Use this skill.
           expect(item?.name).toBe("report")
           expect(item?.title).toBe("Отчет")
           expect(item?.aliases).toEqual(["отчет"])
+          expect(item?.category).toBeUndefined()
           expect(yield* Effect.promise(async () => item?.template)).toContain("Use this skill.")
           expect((yield* command.list()).map((item) => item.name)).toEqual(["init", "review", "report"])
+        }),
+      { git: true },
+    ),
+  )
+
+  cmd.live("preserves skill command category", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(dir, ".opencode", "skill", "guests-yesterday-vs-plan", "SKILL.md"),
+              `---
+name: guests-yesterday-vs-plan
+description: Hotel report skill.
+category: report
+---
+
+# Guests Yesterday vs Plan
+
+Use this skill.
+`,
+            ),
+          )
+
+          const command = yield* Command.Service
+          const item = yield* command.get("guests-yesterday-vs-plan")
+          expect(item?.name).toBe("guests-yesterday-vs-plan")
+          expect(item?.category).toBe("report")
         }),
       { git: true },
     ),
