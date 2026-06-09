@@ -49,6 +49,7 @@ import {
   findLatestReportPath,
   findReportSkillForFile,
   isReportSkill,
+  reportSkillChoices,
   reportSkillCommands,
   reportSkillSignatures,
 } from "@/pages/session/report-session-link"
@@ -529,6 +530,8 @@ export default function Page() {
   const lastUserMessage = createMemo(() => visibleUserMessages().at(-1))
 
   const reportSkills = createMemo(() => reportSkillCommands(sync.data.command))
+  const selectedReportSkillName = createMemo(() => layout.reportSessions.reportSkillForSession(sdk.directory, params.id))
+  const reportSkillOptions = createMemo(() => reportSkillChoices(reportSkills(), selectedReportSkillName()))
   const reportSignature = createMemo(() => reportSkillSignatures(sync.data.command))
   const reportInvoked = createMemo(() => layout.reportSessions.isReportSession(sdk.directory, params.id))
   const latestReportPath = createMemo(() => {
@@ -2149,7 +2152,7 @@ export default function Page() {
                 : undefined
             }
             report={{
-              skills: reportSkills(),
+              skills: reportSkillOptions(),
               hasReport: hasReport(),
               isReportSession: reportInvoked(),
               generating: generatingReport(),

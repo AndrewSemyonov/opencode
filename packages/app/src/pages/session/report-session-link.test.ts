@@ -10,6 +10,7 @@ import {
   hasReportInvocation,
   isReportSkill,
   reportSkillAliases,
+  reportSkillChoices,
   reportSkillCommands,
 } from "./report-session-link"
 
@@ -148,6 +149,29 @@ describe("reportSkillAliases", () => {
 
   it("returns empty when no report skills", () => {
     expect(reportSkillAliases([cmd({ name: "help", source: "skill" })])).toEqual([])
+  })
+})
+
+describe("reportSkillChoices", () => {
+  it("returns only the selected skill when it exists", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+      cmd({ name: "loss-share-breakdown-yesterday", title: "Losses", category: "report", source: "skill" }),
+    ])
+    expect(reportSkillChoices(skills, "guests-yesterday-vs-plan").map((skill) => skill.name)).toEqual([
+      "guests-yesterday-vs-plan",
+    ])
+  })
+
+  it("falls back to the full list when selected skill is unknown", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+      cmd({ name: "loss-share-breakdown-yesterday", title: "Losses", category: "report", source: "skill" }),
+    ])
+    expect(reportSkillChoices(skills, "unknown").map((skill) => skill.name)).toEqual([
+      "guests-yesterday-vs-plan",
+      "loss-share-breakdown-yesterday",
+    ])
   })
 })
 

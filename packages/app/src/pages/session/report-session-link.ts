@@ -82,6 +82,16 @@ export const reportSkillCommands = (commands: Command[] | undefined | null): Rep
     .toSorted((a, b) => (a.title ?? a.name).localeCompare(b.title ?? b.name))
 }
 
+export const reportSkillChoices = (
+  skills: ReportSkillCommand[] | undefined | null,
+  selectedSkillName: string | undefined,
+): ReportSkillCommand[] => {
+  if (!skills || skills.length === 0) return []
+  if (!selectedSkillName) return skills
+  const selected = skills.find((skill) => skill.name === selectedSkillName)
+  return selected ? [selected] : skills
+}
+
 export const reportSkillAliases = (commands: Command[] | undefined | null): string[] => {
   const skills = reportSkillCommands(commands)
   const seen = new Set<string>()
