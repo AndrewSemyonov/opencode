@@ -33,15 +33,18 @@ export namespace SystemPrompt {
     return [PROMPT_DEFAULT]
   }
 
-  // Agents that should be restricted to the HoReCa domain. Hidden / utility agents
-  // (title, summary, compaction) MUST NOT receive the scope override — they're
-  // framing-sensitive and would refuse to summarize / title a perfectly valid
-  // non-HoReCa conversation. Explore is a generic codebase-search subagent and
-  // is also kept out. Keep this list narrow on purpose.
-  const SCOPED_AGENTS = new Set(["build", "plan", "general"])
+  // Agents that should be restricted to the HoReCa domain — user-facing primary
+  // agents only. Hidden / utility agents (title, summary, compaction) MUST NOT
+  // receive the scope override — they're framing-sensitive and would refuse to
+  // summarize / title a perfectly valid non-HoReCa conversation. Subagents
+  // (general, explore) are kept out too: the Task tool dispatches subtasks
+  // through them, so scoping them would degrade or refuse ordinary non-HoReCa
+  // work fanned out by a primary agent. Keep this list narrow on purpose.
+  const SCOPED_AGENTS = new Set(["build", "plan"])
 
   function scopeFor(agent: Agent.Info): string | undefined {
     if (agent.hidden) return
+    if (agent.mode === "subagent") return
     if (!SCOPED_AGENTS.has(agent.name)) return
     return [
       `<scope>`,
