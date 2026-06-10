@@ -10,6 +10,11 @@ export type ReportSkillCommand = Pick<
   "name" | "title" | "description" | "aliases" | "category" | "source" | "template"
 >
 
+type FileClient = {
+  list: (input: { path: string }) => Promise<{ data?: FileListEntry[] }>
+  read: (input: { path: string }) => Promise<{ data?: { type?: string; content?: string } }>
+}
+
 export const expectedReportPath = (reportName: string): string => `reports/${reportName}.mdx`
 
 type FileListEntry = { type?: string; path?: string; name?: string }
@@ -82,6 +87,135 @@ export const reportSkillCommands = (commands: Command[] | undefined | null): Rep
     .toSorted((a, b) => (a.title ?? a.name).localeCompare(b.title ?? b.name))
 }
 
+const sortReportSkills = <T extends { name: string; title?: string | null }>(skills: T[]): T[] =>
+  skills.toSorted((a, b) => (a.title ?? a.name).localeCompare(b.title ?? b.name))
+
+const frontmatterBlock = (content: string): string | undefined => content.match(FRONTMATTER_RE)?.[1]
+
+const FRONTMATTER_KEY_RE = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/
+
+const parseFrontmatter = (content: string): Record<string, string | string[]> => {
+  const block = frontmatterBlock(content)
+  if (!block) return {}
+  const lines = block.split(/\r?\n/)
+  const out: Record<string, string | string[]> = {}
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(FRONTMATTER_KEY_RE)
+    if (!match) continue
+
+    const key = match[1]
+    const rest = match[2].trim()
+    if (rest) {
+      out[key] = unquote(rest)
+      continue
+    }
+
+    const items: string[] = []
+    let j = i + 1
+    while (j < lines.length) {
+      const line = lines[j]
+      if (/^\s*$/.test(line)) {
+        j++
+        continue
+      }
+      if (FRONTMATTER_KEY_RE.test(line)) break
+      const item = line.match(/^\s*-\s*(.*)$/)
+      if (!item) break
+      const value = unquote(item[1])
+      if (value) items.push(value)
+      j++
+    }
+    if (items.length > 0) out[key] = items
+    i = j - 1
+  }
+
+  return out
+}
+
+const toWorkspaceReportSkill = (path: string, content: string): ReportSkillCommand | undefined => {
+  const data = parseFrontmatter(content)
+  const name = typeof data.name === "string" ? data.name : path.split("/").at(-2)
+  const title = typeof data.title === "string" ? data.title : name
+  const description = typeof data.description === "string" ? data.description : ""
+  const aliases = Array.isArray(data.aliases) ? data.aliases.filter((value): value is string => !!value) : []
+  const category = typeof data.category === "string" ? data.category : undefined
+
+  if (!name || !title) return undefined
+  if (!isReportSkill({ name, title, aliases, category })) return undefined
+
+  return {
+    name,
+    title,
+    description,
+    aliases,
+    category,
+    source: "skill",
+    template: content.replace(FRONTMATTER_RE, "").trim(),
+  }
+}
+
+const mergeSkill = (
+  current: ReportSkillCommand | undefined,
+  incoming: ReportSkillCommand,
+): ReportSkillCommand => {
+  if (!current) return incoming
+  return {
+    name: incoming.name || current.name,
+    title: incoming.title ?? current.title ?? incoming.name,
+    description: incoming.description ?? current.description ?? "",
+    aliases: [...new Set([...(current.aliases ?? []), ...(incoming.aliases ?? [])])],
+    category: incoming.category ?? current.category,
+    source: incoming.source ?? current.source,
+    template: incoming.template || current.template || "",
+  }
+}
+
+export const mergeReportSkills = (
+  primary: ReportSkillCommand[] | undefined | null,
+  secondary: ReportSkillCommand[] | undefined | null,
+): ReportSkillCommand[] => {
+  const merged = new Map<string, ReportSkillCommand>()
+  for (const skill of secondary ?? []) {
+    merged.set(skill.name, mergeSkill(merged.get(skill.name), skill))
+  }
+  for (const skill of primary ?? []) {
+    merged.set(skill.name, mergeSkill(merged.get(skill.name), skill))
+  }
+  return sortReportSkills([...merged.values()])
+}
+
+const SKILL_ROOTS = [".opencode/skill", ".opencode/skills"] as const
+
+export const loadWorkspaceReportSkills = async (fileClient: FileClient): Promise<ReportSkillCommand[]> => {
+  const discovered: ReportSkillCommand[] = []
+
+  for (const root of SKILL_ROOTS) {
+    let entries: FileListEntry[]
+    try {
+      entries = (await fileClient.list({ path: root })).data ?? []
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      if (entry.type !== "directory" || !entry.path) continue
+      const skillPath = `${entry.path}/SKILL.md`
+      try {
+        const res = await fileClient.read({ path: skillPath })
+        const data = res.data
+        if (!data || data.type !== "text" || !data.content) continue
+        const skill = toWorkspaceReportSkill(skillPath, data.content)
+        if (skill) discovered.push(skill)
+      } catch {
+        continue
+      }
+    }
+  }
+
+  return mergeReportSkills([], discovered)
+}
+
 export const reportSkillChoices = (
   skills: ReportSkillCommand[] | undefined | null,
   selectedSkillName: string | undefined,
@@ -116,6 +250,20 @@ export const reportSkillAliases = (commands: Command[] | undefined | null): stri
   return out
 }
 
+export const reportSkillAliasesFromSkills = (skills: ReportSkillCommand[] | undefined | null): string[] => {
+  if (!skills || skills.length === 0) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const skill of skills) {
+    for (const value of [skill.name, ...(skill.aliases ?? [])]) {
+      if (!value || seen.has(value)) continue
+      seen.add(value)
+      out.push(value)
+    }
+  }
+  return out
+}
+
 export type ReportSkillSignature = {
   aliases: string[]
   templatePrefixes: string[]
@@ -131,6 +279,13 @@ const templatePrefix = (template: string): string => {
 
 export const reportSkillSignatures = (commands: Command[] | undefined | null): ReportSkillSignature => {
   const skills = reportSkillCommands(commands)
+  return reportSkillSignaturesFromSkills(skills)
+}
+
+export const reportSkillSignaturesFromSkills = (
+  skills: ReportSkillCommand[] | undefined | null,
+): ReportSkillSignature => {
+  if (!skills || skills.length === 0) return { aliases: [], templatePrefixes: [] }
   const aliasSet = new Set<string>()
   const prefixSet = new Set<string>()
   for (const skill of skills) {

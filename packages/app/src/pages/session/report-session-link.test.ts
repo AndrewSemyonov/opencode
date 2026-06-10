@@ -10,6 +10,8 @@ import {
   findSessionIdByReportPath,
   hasReportInvocation,
   isReportSkill,
+  loadWorkspaceReportSkills,
+  mergeReportSkills,
   reportSkillAliases,
   reportSkillChoices,
   reportSkillCommands,
@@ -137,6 +139,102 @@ describe("reportSkillCommands", () => {
     expect(reportSkillCommands(undefined)).toEqual([])
     expect(reportSkillCommands(null)).toEqual([])
     expect(reportSkillCommands([])).toEqual([])
+  })
+})
+
+describe("mergeReportSkills", () => {
+  it("prefers runtime command fields while filling gaps from workspace skills", () => {
+    const merged = mergeReportSkills(
+      [cmd({ name: "hotel-report", title: "Runtime title", source: "skill", template: "Runtime template" })],
+      [
+        {
+          name: "hotel-report",
+          title: "Workspace title",
+          description: "Workspace description",
+          aliases: ["отчет"],
+          category: "report",
+          source: "skill",
+          template: "",
+        },
+      ],
+    )
+
+    expect(merged).toEqual([
+      {
+        name: "hotel-report",
+        title: "Runtime title",
+        description: "Workspace description",
+        aliases: ["отчет"],
+        category: "report",
+        source: "skill",
+        template: "Runtime template",
+      },
+    ])
+  })
+})
+
+describe("loadWorkspaceReportSkills", () => {
+  it("loads report skills from .opencode/skills SKILL.md files", async () => {
+    const out = await loadWorkspaceReportSkills({
+      async list({ path }) {
+        if (path !== ".opencode/skill" && path !== ".opencode/skills") return { data: [] }
+        if (path === ".opencode/skill") return { data: [] }
+        return {
+          data: [
+            { type: "directory", path: ".opencode/skills/guests-yesterday-vs-plan", name: "guests-yesterday-vs-plan" },
+            { type: "directory", path: ".opencode/skills/help", name: "help" },
+          ],
+        }
+      },
+      async read({ path }) {
+        if (path === ".opencode/skills/guests-yesterday-vs-plan/SKILL.md") {
+          return {
+            data: {
+              type: "text",
+              content: `---
+name: guests-yesterday-vs-plan
+title: Гости вчера vs план
+description: Проверяет гостей за вчера
+aliases:
+  - гости вчера
+category: report
+---
+
+# Skill
+`,
+            },
+          }
+        }
+        if (path === ".opencode/skills/help/SKILL.md") {
+          return {
+            data: {
+              type: "text",
+              content: `---
+name: help
+title: Help
+description: Not a report
+---
+
+# Help
+`,
+            },
+          }
+        }
+        throw new Error("not found")
+      },
+    })
+
+    expect(out).toEqual([
+      {
+        name: "guests-yesterday-vs-plan",
+        title: "Гости вчера vs план",
+        description: "Проверяет гостей за вчера",
+        aliases: ["гости вчера"],
+        category: "report",
+        source: "skill",
+        template: "# Skill",
+      },
+    ])
   })
 })
 

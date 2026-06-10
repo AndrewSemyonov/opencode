@@ -8,6 +8,7 @@ import {
   Match,
   Switch,
   createMemo,
+  createResource,
   createSignal,
   createEffect,
   createComputed,
@@ -49,10 +50,11 @@ import {
   findLatestReportPath,
   findLatestReportSkill,
   findReportSkillForFile,
-  isReportSkill,
+  loadWorkspaceReportSkills,
+  mergeReportSkills,
   reportSkillChoices,
   reportSkillCommands,
-  reportSkillSignatures,
+  reportSkillSignaturesFromSkills,
   strictReportSkillChoice,
 } from "@/pages/session/report-session-link"
 import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
@@ -531,8 +533,11 @@ export default function Page() {
   )
   const lastUserMessage = createMemo(() => visibleUserMessages().at(-1))
 
-  const reportSkills = createMemo(() => reportSkillCommands(sync.data.command))
-  const reportSignature = createMemo(() => reportSkillSignatures(sync.data.command))
+  const [workspaceReportSkills] = createResource(() => sdk.directory, () => loadWorkspaceReportSkills(sdk.client.file))
+  const reportSkills = createMemo(() =>
+    mergeReportSkills(reportSkillCommands(sync.data.command), workspaceReportSkills() ?? []),
+  )
+  const reportSignature = createMemo(() => reportSkillSignaturesFromSkills(reportSkills()))
   const reportInvoked = createMemo(() => layout.reportSessions.isReportSession(sdk.directory, params.id))
   const latestReportPath = createMemo(() => {
     const id = params.id
@@ -650,8 +655,6 @@ export default function Page() {
     if (!match) return undefined
     const skillName = match[1]
     if (expectedReportPath(skillName) !== path && `reports/${skillName}.md` !== path) return undefined
-    const cmd = sync.data.command.find((c) => c.name === skillName && c.source === "skill")
-    if (!cmd || !isReportSkill(cmd)) return undefined
     const skill = reportSkills().find((s) => s.name === skillName)
     if (!skill) return undefined
     return (

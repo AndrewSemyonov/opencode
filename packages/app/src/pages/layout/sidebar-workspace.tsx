@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@solidjs/router"
-import { createEffect, createMemo, For, onCleanup, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createSortable } from "@thisbeyond/solid-dnd"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -30,6 +30,8 @@ import {
   findLatestReportFileForSkill,
   findReportSkillForFile,
   findSessionIdByReportPath,
+  loadWorkspaceReportSkills,
+  mergeReportSkills,
   reportSkillCommands,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
@@ -300,7 +302,10 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
   const navigate = useNavigate()
   const language = useLanguage()
   const slug = createMemo(() => base64Encode(props.directory))
-  const skills = createMemo<ReportSkillCommand[]>(() => reportSkillCommands(sync.data.command))
+  const [workspaceSkills] = createResource(() => props.directory, () => loadWorkspaceReportSkills(sdk.client.file))
+  const skills = createMemo<ReportSkillCommand[]>(() =>
+    mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
+  )
 
   const createReportSession = async (skillName: string): Promise<string | undefined> => {
     const created = await sdk.client.session
@@ -363,7 +368,6 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     backfillToken++ // any in-flight pass becomes a no-op
   })
   createEffect(() => {
-    if (sync.data.command.length === 0) return
     const list = skills()
     if (list.length === 0) return
     if (backfillInflight) return // another pass is already running; skip
@@ -380,10 +384,11 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
         // If a newer pass started or the component unmounted, drop results.
         if (token !== backfillToken) return
         await Promise.all(
-          list.map(async (skill) => {
-            const file = findLatestReportFileForSkill(files, skill.name)
-            if (!file) return
-            const sid = await resolveReportSessionId(sdk, sync, file)
+          (files ?? []).map(async (file) => {
+            if (!file.path || file.type === "directory") return
+            const skill = findReportSkillForFile(list, file.path)
+            if (!skill) return
+            const sid = await resolveReportSessionId(sdk, sync, file.path)
             if (token !== backfillToken) return
             if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
           }),
@@ -443,9 +448,13 @@ const WorkspaceFileTreeBody = (props: {
   const layout = useLayout()
   const navigate = useNavigate()
   const slug = createMemo(() => base64Encode(props.directory))
+  const [workspaceSkills] = createResource(() => props.directory, () => loadWorkspaceReportSkills(sdk.client.file))
+  const reportSkills = createMemo(() =>
+    mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
+  )
 
   const skillForReportFile = (filePath: string): string | undefined =>
-    findReportSkillForFile(reportSkillCommands(sync.data.command), filePath)?.name
+    findReportSkillForFile(reportSkills(), filePath)?.name
 
   const openFromTree = async (filePath: string) => {
     if (props.kind === "file") {
