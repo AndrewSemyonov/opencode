@@ -92,6 +92,15 @@ export const reportSkillChoices = (
   return selected ? [selected] : skills
 }
 
+export const strictReportSkillChoice = (
+  skills: ReportSkillCommand[] | undefined | null,
+  selectedSkillName: string | undefined,
+): ReportSkillCommand[] => {
+  if (!skills || skills.length === 0 || !selectedSkillName) return []
+  const selected = skills.find((skill) => skill.name === selectedSkillName)
+  return selected ? [selected] : []
+}
+
 export const reportSkillAliases = (commands: Command[] | undefined | null): string[] => {
   const skills = reportSkillCommands(commands)
   const seen = new Set<string>()
@@ -267,6 +276,51 @@ export const findLatestReportPath = (
     const responseText = assistantTextContent(partLookup[msg.id])
     return extractReportPathFromText(responseText)
   }
+  return undefined
+}
+
+export const findLatestReportSkill = <
+  T extends { name: string; aliases?: string[] | null; template?: string | null },
+>(
+  skills: T[] | null | undefined,
+  messages: Message[] | undefined,
+  parts: Record<string, Part[] | undefined> | undefined,
+): T | undefined => {
+  if (!skills || skills.length === 0 || !messages || messages.length === 0) return undefined
+  const partLookup = parts ?? {}
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== "assistant") continue
+    if (typeof msg.time.completed !== "number") continue
+
+    const responseText = assistantTextContent(partLookup[msg.id])
+    if (!extractReportPathFromText(responseText)) continue
+
+    let userIdx = -1
+    for (let j = i - 1; j >= 0; j--) {
+      if (messages[j].role === "user") {
+        userIdx = j
+        break
+      }
+    }
+    if (userIdx < 0) continue
+
+    const userText = textPartContent(partLookup[messages[userIdx].id])
+    const matches = skills.filter((skill) =>
+      matchesReportInvocation(userText, {
+        aliases: [skill.name, ...(skill.aliases ?? [])],
+        templatePrefixes: (() => {
+          const prefix = templatePrefix(skill.template ?? "")
+          return prefix ? [prefix] : []
+        })(),
+      }),
+    )
+    if (matches.length === 0) continue
+
+    return matches.toSorted((a, b) => b.name.length - a.name.length || a.name.localeCompare(b.name))[0]
+  }
+
   return undefined
 }
 

@@ -5,6 +5,7 @@ import {
   extractReportPathFromText,
   extractSessionIdFromReport,
   findLatestReportPath,
+  findLatestReportSkill,
   findReportSkillForFile,
   findSessionIdByReportPath,
   hasReportInvocation,
@@ -12,6 +13,7 @@ import {
   reportSkillAliases,
   reportSkillChoices,
   reportSkillCommands,
+  strictReportSkillChoice,
 } from "./report-session-link"
 
 describe("extractSessionIdFromReport", () => {
@@ -172,6 +174,33 @@ describe("reportSkillChoices", () => {
       "guests-yesterday-vs-plan",
       "loss-share-breakdown-yesterday",
     ])
+  })
+})
+
+describe("strictReportSkillChoice", () => {
+  it("returns only the selected skill when it exists", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+      cmd({ name: "loss-share-breakdown-yesterday", title: "Losses", category: "report", source: "skill" }),
+    ])
+    expect(strictReportSkillChoice(skills, "guests-yesterday-vs-plan").map((skill) => skill.name)).toEqual([
+      "guests-yesterday-vs-plan",
+    ])
+  })
+
+  it("returns empty when selected skill is unknown", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+      cmd({ name: "loss-share-breakdown-yesterday", title: "Losses", category: "report", source: "skill" }),
+    ])
+    expect(strictReportSkillChoice(skills, "unknown")).toEqual([])
+  })
+
+  it("returns empty when selected skill is missing", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+    ])
+    expect(strictReportSkillChoice(skills, undefined)).toEqual([])
   })
 })
 
@@ -387,6 +416,68 @@ describe("findLatestReportPath", () => {
       a1: [textPart("p2", "a1", "no path here")],
     }
     expect(findLatestReportPath(messages, parts, ["report"])).toBeUndefined()
+  })
+})
+
+describe("findLatestReportSkill", () => {
+  it("returns the skill that produced the latest report", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+      cmd({ name: "loss-share-breakdown-yesterday", title: "Losses", category: "report", source: "skill" }),
+    ])
+    const messages: Message[] = [
+      userMessage("u1"),
+      assistantMessage("a1", 100),
+      userMessage("u2"),
+      assistantMessage("a2", 200),
+    ]
+    const parts = {
+      u1: [textPart("p1", "u1", "/guests-yesterday-vs-plan")],
+      a1: [textPart("p2", "a1", "Saved to reports/guests-yesterday-vs-plan-2026-05-17.mdx")],
+      u2: [textPart("p3", "u2", "/loss-share-breakdown-yesterday")],
+      a2: [textPart("p4", "a2", "Saved to reports/loss-share-breakdown-yesterday-2026-05-18.mdx")],
+    }
+
+    expect(findLatestReportSkill(skills, messages, parts)?.name).toBe("loss-share-breakdown-yesterday")
+  })
+
+  it("matches template-based invocations when the file name is generic", () => {
+    const skills = reportSkillCommands([
+      cmd({
+        name: "guests-yesterday-vs-plan",
+        title: "Guests",
+        category: "report",
+        source: "skill",
+        template: "Сколько гостей пришло вчера и как это соотносится с планом?",
+      }),
+      cmd({
+        name: "loss-share-breakdown-yesterday",
+        title: "Losses",
+        category: "report",
+        source: "skill",
+        template: "Какой процент от общей выдачи ушёл в порчу?",
+      }),
+    ])
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1", 100)]
+    const parts = {
+      u1: [textPart("p1", "u1", "Сколько гостей пришло вчера и как это соотносится с планом? Подготовь отчёт.")],
+      a1: [textPart("p2", "a1", "Готово: reports/report-2026-05-19-10:00.mdx")],
+    }
+
+    expect(findLatestReportSkill(skills, messages, parts)?.name).toBe("guests-yesterday-vs-plan")
+  })
+
+  it("returns undefined when no completed report response exists", () => {
+    const skills = reportSkillCommands([
+      cmd({ name: "guests-yesterday-vs-plan", title: "Guests", category: "report", source: "skill" }),
+    ])
+    const messages: Message[] = [userMessage("u1"), assistantMessage("a1")]
+    const parts = {
+      u1: [textPart("p1", "u1", "/guests-yesterday-vs-plan")],
+      a1: [textPart("p2", "a1", "Working on it")],
+    }
+
+    expect(findLatestReportSkill(skills, messages, parts)).toBeUndefined()
   })
 })
 

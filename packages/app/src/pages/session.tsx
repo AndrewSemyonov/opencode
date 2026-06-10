@@ -47,11 +47,13 @@ import { createSessionComposerState, SessionComposerRegion } from "@/pages/sessi
 import {
   expectedReportPath,
   findLatestReportPath,
+  findLatestReportSkill,
   findReportSkillForFile,
   isReportSkill,
   reportSkillChoices,
   reportSkillCommands,
   reportSkillSignatures,
+  strictReportSkillChoice,
 } from "@/pages/session/report-session-link"
 import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
 import { consumePendingFileOpen, peekPendingFileOpen, requestOpenFile } from "@/pages/session/pending-file-open"
@@ -530,14 +532,27 @@ export default function Page() {
   const lastUserMessage = createMemo(() => visibleUserMessages().at(-1))
 
   const reportSkills = createMemo(() => reportSkillCommands(sync.data.command))
-  const selectedReportSkillName = createMemo(() => layout.reportSessions.reportSkillForSession(sdk.directory, params.id))
-  const reportSkillOptions = createMemo(() => reportSkillChoices(reportSkills(), selectedReportSkillName()))
   const reportSignature = createMemo(() => reportSkillSignatures(sync.data.command))
   const reportInvoked = createMemo(() => layout.reportSessions.isReportSession(sdk.directory, params.id))
   const latestReportPath = createMemo(() => {
     const id = params.id
     if (!id) return undefined
     return findLatestReportPath(sync.data.message[id], sync.data.part, reportSignature())
+  })
+  const inferredReportSkill = createMemo(() => {
+    const id = params.id
+    if (!id) return undefined
+    return (
+      findLatestReportSkill(reportSkills(), sync.data.message[id], sync.data.part) ??
+      (latestReportPath() ? findReportSkillForFile(reportSkills(), latestReportPath()!) : undefined)
+    )
+  })
+  const selectedReportSkillName = createMemo(
+    () => layout.reportSessions.reportSkillForSession(sdk.directory, params.id) ?? inferredReportSkill()?.name,
+  )
+  const reportSkillOptions = createMemo(() => {
+    if (reportInvoked()) return strictReportSkillChoice(reportSkills(), selectedReportSkillName())
+    return reportSkillChoices(reportSkills(), selectedReportSkillName())
   })
   // Derive hasReport from latestReportPath so the two memos can't disagree.
   // latestReportPath already gates on reportSignature (skill aliases match a
@@ -547,8 +562,8 @@ export default function Page() {
   const hasReport = createMemo(() => reportInvoked() && !!latestReportPath())
   createEffect(
     on(
-      [latestReportPath, () => params.id],
-      ([path, id], prev) => {
+      [latestReportPath, () => params.id, inferredReportSkill],
+      ([path, id, skill], prev) => {
         const prevPath = prev?.[0]
         if (!path || !id) {
           const pending = peekPendingFileOpen()
@@ -557,7 +572,6 @@ export default function Page() {
           }
           return
         }
-        const skill = findReportSkillForFile(reportSkills(), path)
         if (skill) layout.reportSessions.markReportSession(sdk.directory, id, skill.name)
         if (path === prevPath) return
         requestOpenFile({ kind: "report", path, sessionId: id })
