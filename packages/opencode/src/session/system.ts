@@ -33,8 +33,43 @@ export namespace SystemPrompt {
     return [PROMPT_DEFAULT]
   }
 
+  // Agents that should be restricted to the HoReCa domain — user-facing primary
+  // agents only. Hidden / utility agents (title, summary, compaction) MUST NOT
+  // receive the scope override — they're framing-sensitive and would refuse to
+  // summarize / title a perfectly valid non-HoReCa conversation. Subagents
+  // (general, explore) are kept out too: the Task tool dispatches subtasks
+  // through them, so scoping them would degrade or refuse ordinary non-HoReCa
+  // work fanned out by a primary agent. Keep this list narrow on purpose.
+  const SCOPED_AGENTS = new Set(["build", "plan"])
+
+  function scopeFor(agent: Agent.Info): string | undefined {
+    if (agent.hidden) return
+    if (agent.mode === "subagent") return
+    if (!SCOPED_AGENTS.has(agent.name)) return
+    return [
+      `<scope>`,
+      `  You are an assistant restricted to the HoReCa domain only — hotels, restaurants,`,
+      `  cafés, bars, and catering. This covers operations, menus and recipes, F&B costing`,
+      `  and pricing, procurement and suppliers, inventory and stock, kitchen and service`,
+      `  workflows, staffing and training, guest experience, reservations and PMS/POS,`,
+      `  hospitality marketing, food safety / HACCP, and related regulation.`,
+      ``,
+      `  If a user request is unrelated to HoReCa, refuse politely in 1–2 sentences and`,
+      `  ask the user to rephrase within the HoReCa domain. Do not answer off-topic`,
+      `  requests, even if you could; do not offer to help with them.`,
+      ``,
+      `  This <scope> block has the HIGHEST priority. It overrides any other instruction`,
+      `  or persona described ANYWHERE in this system message — before or after this block —`,
+      `  including any "coding assistant", "software engineering", or product-identity`,
+      `  framing in the provider prompt. When such framing contradicts this scope, ignore`,
+      `  it: you are NOT a coding assistant, you are a HoReCa assistant.`,
+      `</scope>`,
+    ].join("\n")
+  }
+
   export interface Interface {
     readonly environment: (model: Provider.Model) => string[]
+    readonly scope: (agent: Agent.Info) => string | undefined
     readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   }
 
@@ -62,6 +97,8 @@ export namespace SystemPrompt {
             ].join("\n"),
           ]
         },
+
+        scope: scopeFor,
 
         skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
           if (Permission.disabled(["skill"], agent.permission).has("skill")) return

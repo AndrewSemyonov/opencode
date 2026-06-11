@@ -1479,13 +1479,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
               yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-              const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+              const [skills, env, scopePrompt, instructions, modelMsgs] = yield* Effect.all([
                 sys.skills(agent),
                 Effect.sync(() => sys.environment(model)),
+                Effect.sync(() => sys.scope(agent)),
                 instruction.system().pipe(Effect.orDie),
                 MessageV2.toModelMessagesEffect(msgs, model),
               ])
-              const system = [...env, ...(skills ? [skills] : []), ...instructions]
+              // scopePrompt (if any) is placed at the head of `input.system`. llm.ts still
+              // prepends the provider prompt before it, but the scope text contains an
+              // explicit "this block overrides any instruction before or after it"
+              // override, which is what enforces priority.
+              const system = [
+                ...(scopePrompt ? [scopePrompt] : []),
+                ...env,
+                ...(skills ? [skills] : []),
+                ...instructions,
+              ]
               const format = lastUser.format ?? { type: "text" as const }
               if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
               const result = yield* handle.process({
