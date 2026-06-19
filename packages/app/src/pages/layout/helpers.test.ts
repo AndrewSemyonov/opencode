@@ -14,6 +14,7 @@ import {
   errorMessage,
   hasProjectPermissions,
   latestRootSession,
+  projectForDirectory,
   workspaceKey,
 } from "./helpers"
 
@@ -119,6 +120,26 @@ describe("layout workspace helpers", () => {
   test("keeps local first while preserving known order", () => {
     const result = effectiveWorkspaceOrder("/root", ["/root", "/b", "/c"], ["/root", "/c", "/a", "/b"])
     expect(result).toEqual(["/root", "/c", "/b"])
+  })
+
+  test("falls back to synced project when local project list is empty", () => {
+    const result = projectForDirectory({
+      directory: "/workspace",
+      projects: [],
+      global: [{ id: "project", worktree: "/workspace" }],
+    })
+
+    expect(result?.worktree).toBe("/workspace")
+  })
+
+  test("keeps local project before synced project", () => {
+    const result = projectForDirectory({
+      directory: "/workspace",
+      projects: [{ id: "local", worktree: "/workspace", expanded: false }],
+      global: [{ id: "synced", worktree: "/workspace" }],
+    })
+
+    expect(result?.id).toBe("local")
   })
 
   test("finds the latest root session across workspaces", () => {

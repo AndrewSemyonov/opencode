@@ -1,5 +1,5 @@
 import { getFilename } from "@opencode-ai/shared/util/path"
-import { type Session } from "@opencode-ai/sdk/v2/client"
+import { type Project, type Session } from "@opencode-ai/sdk/v2/client"
 
 type SessionStore = {
   session?: Session[]
@@ -98,4 +98,33 @@ export const effectiveWorkspaceOrder = (local: string, dirs: string[], persisted
   }
 
   return [...result, ...live.values()]
+}
+
+type ProjectLike = Partial<Project> & { worktree: string; expanded?: boolean }
+
+export function projectForDirectory(input: {
+  directory: string
+  projects: ProjectLike[]
+  global: ProjectLike[]
+  projectID?: string
+}) {
+  const key = workspaceKey(input.directory)
+
+  const sandbox = input.projects.find((p) => p.sandboxes?.some((item) => workspaceKey(item) === key))
+  if (sandbox) return sandbox
+
+  const direct = input.projects.find((p) => workspaceKey(p.worktree) === key)
+  if (direct) return direct
+
+  const synced = input.global.find((p) => workspaceKey(p.worktree) === key)
+  if (synced) return synced
+
+  const id = input.projectID
+  if (!id) return
+
+  const meta = input.global.find((p) => p.id === id)
+  const root = meta?.worktree
+  if (!root) return
+
+  return input.projects.find((p) => p.worktree === root) ?? meta
 }

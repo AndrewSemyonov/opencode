@@ -69,6 +69,7 @@ import {
   effectiveWorkspaceOrder,
   errorMessage,
   latestRootSession,
+  projectForDirectory,
   sortedRootSessions,
   workspaceKey,
 } from "./layout/helpers"
@@ -544,25 +545,16 @@ export default function Layout(props: ParentProps) {
   const currentProject = createMemo(() => {
     const directory = currentDir()
     if (!directory) return
-    const key = workspaceKey(directory)
-
-    const projects = layout.projects.list()
-
-    const sandbox = projects.find((p) => p.sandboxes?.some((item) => workspaceKey(item) === key))
-    if (sandbox) return sandbox
-
-    const direct = projects.find((p) => workspaceKey(p.worktree) === key)
-    if (direct) return direct
 
     const [child] = globalSync.child(directory, { bootstrap: false })
-    const id = child.project
-    if (!id) return
-
-    const meta = globalSync.data.project.find((p) => p.id === id)
-    const root = meta?.worktree
-    if (!root) return
-
-    return projects.find((p) => p.worktree === root)
+    const project = projectForDirectory({
+      directory,
+      projects: layout.projects.list(),
+      global: globalSync.data.project,
+      projectID: child.project,
+    })
+    if (!project) return
+    return { ...project, expanded: project.expanded ?? true }
   })
 
   const [autoselecting] = createResource(async () => {
