@@ -713,13 +713,12 @@ export namespace Session {
     limit?: number
   }) {
     const project = Instance.project
-    const conditions = [eq(SessionTable.project_id, project.id)]
+    const conditions: SQL[] = input?.directory
+      ? [eq(SessionTable.directory, input.directory)]
+      : [eq(SessionTable.project_id, project.id)]
 
     if (input?.workspaceID) {
       conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
-    }
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect } from "effect"
+import * as fs from "fs/promises"
 import { Instance } from "../../src/project/instance"
 import { Session as SessionNs } from "../../src/session"
 import { Log } from "../../src/util/log"
@@ -41,6 +42,27 @@ describe("session.list", () => {
 
         expect(ids).toContain(first.id)
         expect(ids).not.toContain(second.id)
+      },
+    })
+  })
+
+  test("lists directory sessions when current project changes", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const created = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => svc.create({ title: "legacy-session" }),
+    })
+
+    await fs.rm(`${tmp.path}/.git`, { recursive: true, force: true })
+    await Instance.disposeAll()
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const sessions = [...svc.list({ directory: tmp.path })]
+        const ids = sessions.map((s) => s.id)
+
+        expect(ids).toContain(created.id)
       },
     })
   })
