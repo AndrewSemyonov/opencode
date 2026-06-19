@@ -8,31 +8,69 @@ on:
         required: true
         type: string
   push:
-    tags:
-      - 'opencode-v*'
+    branches:
+      - dev
 
 permissions:
   contents: write
+
+concurrency:
+  group: opencode-linux-release
+  cancel-in-progress: false
 
 jobs:
   build-linux-x64:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
+          fetch-depth: 0
+
       - name: Resolve release
         id: release
         env:
-          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
         run: |
+          git fetch --tags --force
+
+          if [[ -n "$INPUT_TAG" ]]; then
+            TAG="$INPUT_TAG"
+            if [[ ! "$TAG" =~ ^opencode-v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+              echo "Invalid release tag: $TAG" >&2
+              exit 1
+            fi
+            if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              echo "Release tag does not exist: $TAG" >&2
+              exit 1
+            fi
+            git checkout --detach "$TAG"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#opencode-v}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LATEST="$(git tag -l 'opencode-v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          if [[ ! "$LATEST" =~ ^opencode-v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Cannot resolve latest release tag" >&2
+            exit 1
+          fi
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+          TAG="opencode-v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          while git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; do
+            PATCH="$((PATCH + 1))"
+            TAG="opencode-v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          done
           if [[ ! "$TAG" =~ ^opencode-v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
             echo "Invalid release tag: $TAG" >&2
             exit 1
           fi
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#opencode-v}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.release.outputs.tag }}
 
       - uses: oven-sh/setup-bun@v2
         with:
