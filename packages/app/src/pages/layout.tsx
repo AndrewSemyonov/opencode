@@ -168,6 +168,7 @@ export default function Layout(props: ParentProps) {
     peek: undefined as string | undefined,
     peeked: false,
   })
+  const auto = { opened: false }
 
   const editor = createInlineEditorController()
   const setBusy = (directory: string, value: boolean) => {
@@ -215,6 +216,16 @@ export default function Layout(props: ParentProps) {
     if (sizet !== undefined) clearTimeout(sizet)
     if (peekt !== undefined) clearTimeout(peekt)
     aim.reset()
+  })
+
+  createEffect(() => {
+    if (!WORKSPACES_HIDDEN) return
+    if (auto.opened) return
+    if (!layoutReady()) return
+    if (!params.dir) return
+    auto.opened = true
+    if (layout.sidebar.opened()) return
+    layout.sidebar.open()
   })
 
   onMount(() => {
