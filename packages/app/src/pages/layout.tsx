@@ -80,11 +80,11 @@ import {
 } from "./layout/deep-links"
 import { createInlineEditorController } from "./layout/inline-editor"
 import {
-  FILES_ROOT_NAMES,
+  // FILES_ROOT_NAMES, // Hidden: Files section
   LocalWorkspace,
   SortableWorkspace,
   WorkspaceDragOverlay,
-  WorkspaceFileTreeSection,
+  // WorkspaceFileTreeSection, // Hidden: Files section
   WorkspaceReportSkillList,
   WorkspaceSubsection,
   type WorkspaceSidebarContext,
@@ -2248,6 +2248,7 @@ export default function Layout(props: ParentProps) {
                       >
                         <WorkspaceReportSkillList directory={worktree()} />
                       </WorkspaceSubsection>
+                      {/* Hidden: Files section
                       <WorkspaceSubsection
                         label={language.t("sidebar.heading.files")}
                         open={() => workspaceSidebarCtx.workspaceFilesExpanded(worktree())}
@@ -2255,6 +2256,7 @@ export default function Layout(props: ParentProps) {
                       >
                         <WorkspaceFileTreeSection directory={worktree()} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
                       </WorkspaceSubsection>
+                      */}
                     </div>
                   }
                 >
