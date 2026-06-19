@@ -10,6 +10,9 @@ on:
   push:
     branches:
       - dev
+  check_suite:
+    types:
+      - requested
 
 permissions:
   contents: write
@@ -20,17 +23,19 @@ concurrency:
 
 jobs:
   build-linux-x64:
+    if: github.event_name != 'check_suite' || (github.event.check_suite.head_branch == 'dev' && github.event.check_suite.app.name == 'Railway App')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event_name == 'check_suite' && github.event.check_suite.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Resolve release
         id: release
         env:
           INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+          RELEASE_SHA: ${{ github.event_name == 'check_suite' && github.event.check_suite.head_sha || github.sha }}
         run: |
           git fetch --tags --force
 
@@ -67,7 +72,7 @@ jobs:
             echo "Invalid release tag: $TAG" >&2
             exit 1
           fi
-          git tag "$TAG" "$GITHUB_SHA"
+          git tag "$TAG" "$RELEASE_SHA"
           git push origin "refs/tags/$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#opencode-v}" >> "$GITHUB_OUTPUT"
