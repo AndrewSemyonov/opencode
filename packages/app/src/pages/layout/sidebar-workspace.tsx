@@ -735,6 +735,7 @@ export const SortableWorkspace = (props: {
           >
             <WorkspaceReportSkillList directory={props.directory} />
           </WorkspaceSubsection>
+          {/* Hidden: Files section
           <WorkspaceSubsection
             label={language.t("sidebar.heading.files")}
             open={() => props.ctx.workspaceFilesExpanded(props.directory)}
@@ -742,6 +743,7 @@ export const SortableWorkspace = (props: {
           >
             <WorkspaceFileTreeSection directory={props.directory} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
           </WorkspaceSubsection>
+          */}
         </Collapsible.Content>
       </Collapsible>
     </div>
