@@ -1,10 +1,10 @@
-import { createEffect, createMemo, onCleanup, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, onCleanup, Show, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Button } from "@opencode-ai/ui/button"
-import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 
 import { useLayout } from "@/context/layout"
@@ -34,6 +34,25 @@ type TauriApi = {
 const tauriApi = () => (window as unknown as { __TAURI__?: TauriApi }).__TAURI__
 const currentDesktopWindow = () => tauriApi()?.window?.getCurrentWindow?.()
 const currentThemeWindow = () => tauriApi()?.webviewWindow?.getCurrentWebviewWindow?.()
+const opspaceWindow = () => window as Window & { __OPSPACE_DASHBOARD_URL__?: string | null }
+
+async function fetchOpspaceRuntime() {
+  if (typeof window === "undefined") return undefined
+  const win = opspaceWindow()
+  if (win.__OPSPACE_DASHBOARD_URL__ !== undefined) return win.__OPSPACE_DASHBOARD_URL__ || undefined
+
+  try {
+    const response = await fetch("/opspace/runtime")
+    if (!response.ok) return undefined
+    const data = (await response.json()) as { dashboardUrl?: unknown }
+    const url = typeof data.dashboardUrl === "string" ? data.dashboardUrl.trim() : ""
+    win.__OPSPACE_DASHBOARD_URL__ = url || null
+    return url || undefined
+  } catch {
+    win.__OPSPACE_DASHBOARD_URL__ = null
+    return undefined
+  }
+}
 
 export function Titlebar() {
   const layout = useLayout()
@@ -63,6 +82,7 @@ export function Titlebar() {
     const parts = location.pathname.replace(/\/+$/, "").split("/")
     return parts.at(-1) === "session"
   })
+  const [dashboardUrl] = createResource(fetchOpspaceRuntime)
 
   createEffect(() => {
     const current = path()
@@ -185,6 +205,21 @@ export function Titlebar() {
             <Icon size="small" name={layout.sidebar.opened() ? "sidebar-active" : "sidebar"} />
           </Button>
         </TooltipKeybind>
+        <Show when={dashboardUrl()}>
+          {(url) => (
+            <Tooltip class="hidden xl:flex shrink-0 pl-1" placement="bottom" value="В панель управления">
+              <Button
+                as="a"
+                href={url()}
+                variant="ghost"
+                class="titlebar-icon h-6 px-2 box-border text-12-medium no-underline"
+                aria-label="Вернуться в панель управления"
+              >
+                Панель
+              </Button>
+            </Tooltip>
+          )}
+        </Show>
         <Show when={mac()}>
           <div class="h-full shrink-0" style={{ width: `${72 / zoom()}px` }} />
           <div class="xl:hidden w-10 shrink-0 flex items-center justify-center">
