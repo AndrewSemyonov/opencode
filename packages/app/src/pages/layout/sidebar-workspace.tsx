@@ -265,6 +265,7 @@ export const WorkspaceSubsection = (props: {
 )
 
 const FILES_ROOT_NAMES = ["reports"] as const
+export const WORKSPACE_FILES_VISIBLE = false
 
 async function resolveReportSessionId(
   sdk: ReturnType<typeof useSDK>,
@@ -735,15 +736,15 @@ export const SortableWorkspace = (props: {
           >
             <WorkspaceReportSkillList directory={props.directory} />
           </WorkspaceSubsection>
-          {/* Hidden: Files section
-          <WorkspaceSubsection
-            label={language.t("sidebar.heading.files")}
-            open={() => props.ctx.workspaceFilesExpanded(props.directory)}
-            onOpenChange={(v) => props.ctx.setWorkspaceFilesExpanded(props.directory, v)}
-          >
-            <WorkspaceFileTreeSection directory={props.directory} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
-          </WorkspaceSubsection>
-          */}
+          <Show when={WORKSPACE_FILES_VISIBLE}>
+            <WorkspaceSubsection
+              label={language.t("sidebar.heading.files")}
+              open={() => props.ctx.workspaceFilesExpanded(props.directory)}
+              onOpenChange={(v) => props.ctx.setWorkspaceFilesExpanded(props.directory, v)}
+            >
+              <WorkspaceFileTreeSection directory={props.directory} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
+            </WorkspaceSubsection>
+          </Show>
         </Collapsible.Content>
       </Collapsible>
     </div>

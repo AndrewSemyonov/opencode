@@ -80,11 +80,12 @@ import {
 } from "./layout/deep-links"
 import { createInlineEditorController } from "./layout/inline-editor"
 import {
-  // FILES_ROOT_NAMES, // Hidden: Files section
+  FILES_ROOT_NAMES,
   LocalWorkspace,
   SortableWorkspace,
   WorkspaceDragOverlay,
-  // WorkspaceFileTreeSection, // Hidden: Files section
+  WorkspaceFileTreeSection,
+  WORKSPACE_FILES_VISIBLE,
   WorkspaceReportSkillList,
   WorkspaceSubsection,
   type WorkspaceSidebarContext,
@@ -2248,15 +2249,20 @@ export default function Layout(props: ParentProps) {
                       >
                         <WorkspaceReportSkillList directory={worktree()} />
                       </WorkspaceSubsection>
-                      {/* Hidden: Files section
-                      <WorkspaceSubsection
-                        label={language.t("sidebar.heading.files")}
-                        open={() => workspaceSidebarCtx.workspaceFilesExpanded(worktree())}
-                        onOpenChange={(v) => workspaceSidebarCtx.setWorkspaceFilesExpanded(worktree(), v)}
-                      >
-                        <WorkspaceFileTreeSection directory={worktree()} path="" rootNames={FILES_ROOT_NAMES} kind="file" />
-                      </WorkspaceSubsection>
-                      */}
+                      <Show when={WORKSPACE_FILES_VISIBLE}>
+                        <WorkspaceSubsection
+                          label={language.t("sidebar.heading.files")}
+                          open={() => workspaceSidebarCtx.workspaceFilesExpanded(worktree())}
+                          onOpenChange={(v) => workspaceSidebarCtx.setWorkspaceFilesExpanded(worktree(), v)}
+                        >
+                          <WorkspaceFileTreeSection
+                            directory={worktree()}
+                            path=""
+                            rootNames={FILES_ROOT_NAMES}
+                            kind="file"
+                          />
+                        </WorkspaceSubsection>
+                      </Show>
                     </div>
                   }
                 >
