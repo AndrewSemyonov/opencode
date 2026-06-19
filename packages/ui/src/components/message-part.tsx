@@ -576,6 +576,11 @@ function isVisibleText(part: PartType) {
   return part.type === "text" && !!part.text?.trim()
 }
 
+function final(parts: { messageID: string; part: PartType }[]) {
+  const part = parts.findLast((item) => isVisibleText(item.part))
+  return part ? [part] : []
+}
+
 function toolDefaultOpen(tool: string, shell = false, edit = false) {
   if (tool === "bash") return shell
   if (tool === "edit" || tool === "write" || tool === "apply_patch") return edit
@@ -609,13 +614,13 @@ export function AssistantParts(props: {
   const grouped = createMemo(
     () =>
       groupParts(
-        props.messages.flatMap((message) =>
-          list(data.store.part?.[message.id], emptyParts)
-            .filter(isVisibleText)
-            .map((part) => ({
+        final(
+          props.messages.flatMap((message) =>
+            list(data.store.part?.[message.id], emptyParts).map((part) => ({
               messageID: message.id,
               part,
             })),
+          ),
         ),
       ),
     [] as PartGroup[],
@@ -830,12 +835,12 @@ export function AssistantMessageDisplay(props: {
   const grouped = createMemo(
     () =>
       groupParts(
-        props.parts
-          .filter(isVisibleText)
-          .map((part) => ({
+        final(
+          props.parts.map((part) => ({
             messageID: props.message.id,
             part,
           })),
+        ),
       ),
     [] as PartGroup[],
     { equals: sameGroups },
