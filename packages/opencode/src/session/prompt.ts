@@ -288,7 +288,7 @@ You should build your plan incrementally by writing to or editing this file. NOT
 ## Plan Workflow
 
 ### Phase 1: Initial Understanding
-Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the explore subagent type.
+Goal: Gain a comprehensive understanding of the user's request by reading through code. Critical: In this phase you should only use the explore subagent type.
 
 1. Focus on understanding the user's request and the code associated with their request
 
@@ -298,7 +298,7 @@ Goal: Gain a comprehensive understanding of the user's request by reading throug
    - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)
    - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigates testing patterns
 
-3. After exploring the code, use the question tool to clarify ambiguities in the user request up front.
+3. After exploring the code, resolve ambiguities from repository context where possible. If you remain blocked, ask the user directly in your final message.
 
 ### Phase 2: Design
 Goal: Design an implementation approach.
@@ -331,7 +331,7 @@ In the agent prompt:
 Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
 1. Read the critical files identified by agents to deepen your understanding
 2. Ensure that the plans align with the user's original request
-3. Use question tool to clarify any remaining questions with the user
+3. If you remain blocked by missing requirements, ask the user directly in your final message
 
 ### Phase 4: Final Plan
 Goal: Write your final plan to the plan file (the only file you can edit).
@@ -342,9 +342,9 @@ Goal: Write your final plan to the plan file (the only file you can edit).
 
 ### Phase 5: Call plan_exit tool
 At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning.
-This is critical - your turn should only end with either asking the user a question or calling plan_exit. Do not stop unless it's for these 2 reasons.
+This is critical - your turn should only end with either directly asking the user a question in your response or calling plan_exit. Do not stop unless it's for these 2 reasons.
 
-**Important:** Use question tool to clarify requirements/approach, use plan_exit to request plan approval. Do NOT use question tool to ask "Is this plan okay?" - that's what plan_exit does.
+**Important:** Ask the user directly to clarify requirements/approach, use plan_exit to request plan approval. Do NOT ask "Is this plan okay?" directly - that's what plan_exit does.
 
 NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.
 </system-reminder>`,

@@ -13,6 +13,8 @@ import { Card } from "./card"
 import { SessionRetry } from "./session-retry"
 import { createAutoScroll } from "../hooks"
 import { useI18n } from "../context/i18n"
+import { Spinner } from "./spinner"
+import { TextShimmer } from "./text-shimmer"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -283,7 +285,17 @@ export function SessionTurn(
                   <MessageDivider label={divider()} />
                 </div>
               </Show>
-              <Show when={assistantMessages().length > 0}>
+              <Show when={working()}>
+                <div data-slot="session-turn-thinking" aria-live="polite">
+                  <Spinner />
+                  <TextShimmer
+                    class="session-turn-thinking-heading"
+                    text={`${i18n.t("ui.sessionTurn.status.thinking")}...`}
+                    active
+                  />
+                </div>
+              </Show>
+              <Show when={!working() && assistantMessages().length > 0}>
                 <div data-slot="session-turn-assistant-content" aria-hidden={working()}>
                   <AssistantParts
                     messages={assistantMessages()}

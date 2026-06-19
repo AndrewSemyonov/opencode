@@ -1,6 +1,5 @@
 import { PlanExitTool } from "./plan"
 import { Session } from "../session"
-import { QuestionTool } from "./question"
 import { BashTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
@@ -106,7 +105,6 @@ export namespace ToolRegistry {
       const invalid = yield* InvalidTool
       const task = yield* TaskTool
       const read = yield* ReadTool
-      const question = yield* QuestionTool
       const todo = yield* TodoWriteTool
       const lsptool = yield* LspTool
       const plan = yield* PlanExitTool
@@ -177,9 +175,6 @@ export namespace ToolRegistry {
           }
 
           const cfg = yield* config.get()
-          const questionEnabled =
-            ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) || Flag.OPENCODE_ENABLE_QUESTION_TOOL
-
           const tool = yield* Effect.all({
             invalid: Tool.init(invalid),
             bash: Tool.init(bash),
@@ -195,7 +190,6 @@ export namespace ToolRegistry {
             code: Tool.init(codesearch),
             skill: Tool.init(skilltool),
             patch: Tool.init(patchtool),
-            question: Tool.init(question),
             lsp: Tool.init(lsptool),
             plan: Tool.init(plan),
           })
@@ -204,7 +198,6 @@ export namespace ToolRegistry {
             custom,
             builtin: [
               tool.invalid,
-              ...(questionEnabled ? [tool.question] : []),
               tool.bash,
               tool.read,
               tool.glob,
