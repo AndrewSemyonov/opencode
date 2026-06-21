@@ -207,15 +207,15 @@ export function Titlebar() {
         </TooltipKeybind>
         <Show when={dashboardUrl()}>
           {(url) => (
-            <Tooltip class="hidden xl:flex shrink-0 pl-1" placement="bottom" value="В панель управления">
+            <Tooltip class="flex shrink-0 pl-1 order-2 xl:order-none" placement="bottom" value="Выйти в панель управления">
               <Button
                 as="a"
                 href={url()}
                 variant="ghost"
-                class="titlebar-icon h-6 px-2 box-border text-12-medium no-underline"
-                aria-label="Вернуться в панель управления"
+                class="titlebar-icon h-6 px-1.5 sm:px-2 box-border text-12-medium no-underline"
+                aria-label="Выйти в панель управления"
               >
-                Панель
+                Выход
               </Button>
             </Tooltip>
           )}
@@ -288,7 +288,9 @@ export function Titlebar() {
       </div>
 
       <div class="min-w-0 flex items-center justify-center gap-2 pointer-events-none">
-        <div class="pointer-events-auto text-13-medium text-text-strong select-none">{language.t("app.name.desktop")}</div>
+        <div class="hidden sm:block pointer-events-auto text-13-medium text-text-strong select-none">
+          {language.t("app.name.desktop")}
+        </div>
         <div id="opencode-titlebar-center" class="pointer-events-auto min-w-0 flex justify-center w-fit max-w-full" />
       </div>
 
