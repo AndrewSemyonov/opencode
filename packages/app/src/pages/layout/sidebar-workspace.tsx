@@ -20,6 +20,7 @@ import { useLanguage } from "@/context/language"
 import { useServer } from "@/context/server"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions, workspaceKey } from "./helpers"
+import { pageUntilVisibleProgress, SESSION_PAGE_SIZE } from "./session-paging"
 import FileTree from "@/components/file-tree"
 import { FileProvider } from "@/context/file"
 import { SDKProvider, useSDK } from "@/context/sdk"
@@ -666,23 +667,29 @@ export const SortableWorkspace = (props: {
   const loading = createMemo(() => open() && !booted() && count() === 0 && !wasBusy())
   const touch = createMediaQuery("(hover: none)")
   const showNew = createMemo(() => !loading() && (touch() || count() === 0 || (active() && !params.id)))
-  const loadMore = async () => {
-    // hasMore reflects raw server rows, but the visible list filters out
-    // report sessions. A page can consist entirely of reports → count
-    // doesn't grow even though hasMore stays true. Keep paging until either
-    // the filtered count advances or the server runs out, with a safety cap
-    // so we never page indefinitely.
-    // Using 20 instead of 5 so we can push through dense stretches of
-    // report-only pages without the user having to click "Load more" repeatedly.
-    const MAX_AUTO_PAGES = 20
-    const initial = count()
-    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
-      setWorkspaceStore("limit", (limit) => (limit ?? 0) + 5)
-      await globalSync.project.loadSessions(props.directory)
-      if (!workspaceStore.hasMore) return
-      if (count() > initial) return
+  const loadMore = () =>
+    pageUntilVisibleProgress({
+      visibleCount: count,
+      rawCount: () => workspaceStore.session?.length ?? 0,
+      hasMore: () => workspaceStore.hasMore,
+      bumpLimit: () => setWorkspaceStore("limit", (limit) => (limit ?? 0) + SESSION_PAGE_SIZE),
+      reload: () => globalSync.project.loadSessions(props.directory),
+    })
+
+  // When the freshest page is entirely report sessions, the visible list can be
+  // empty even though normal chats exist further down. Surface the first real
+  // page automatically so the user never faces a misleadingly empty workspace
+  // with no obvious way forward. Guarded so it runs at most once per mount.
+  let autoSurfaced = false
+  createEffect(() => {
+    if (autoSurfaced || !booted()) return
+    if (count() > 0 || !workspaceStore.hasMore) {
+      autoSurfaced = true
+      return
     }
-  }
+    autoSurfaced = true
+    void loadMore()
+  })
 
   const workspaceEditActive = createMemo(() => props.ctx.editorOpen(`workspace:${props.directory}`))
   const header = () => (
@@ -840,19 +847,27 @@ export const LocalWorkspace = (props: {
   const count = createMemo(() => sessions()?.length ?? 0)
   const loading = createMemo(() => !booted() && count() === 0)
   const hasMore = createMemo(() => workspace().store.hasMore)
-  const loadMore = async () => {
-    // See SortableWorkspace.loadMore — keep paging while filtered count
-    // stagnates so a stretch of report sessions can't strand the user with
-    // an infinitely-clicking "Load more" button.
-    const MAX_AUTO_PAGES = 20
-    const initial = count()
-    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
-      workspace().setStore("limit", (limit) => (limit ?? 0) + 5)
-      await globalSync.project.loadSessions(props.project.worktree)
-      if (!workspace().store.hasMore) return
-      if (count() > initial) return
+  const loadMore = () =>
+    pageUntilVisibleProgress({
+      visibleCount: count,
+      rawCount: () => workspace().store.session?.length ?? 0,
+      hasMore: () => workspace().store.hasMore,
+      bumpLimit: () => workspace().setStore("limit", (limit) => (limit ?? 0) + SESSION_PAGE_SIZE),
+      reload: () => globalSync.project.loadSessions(props.project.worktree),
+    })
+
+  // See SortableWorkspace — surface the first page of visible sessions when the
+  // newest rows are all report sessions, so the workspace never looks empty.
+  let autoSurfaced = false
+  createEffect(() => {
+    if (autoSurfaced || !booted()) return
+    if (count() > 0 || !workspace().store.hasMore) {
+      autoSurfaced = true
+      return
     }
-  }
+    autoSurfaced = true
+    void loadMore()
+  })
 
   return (
     <div
