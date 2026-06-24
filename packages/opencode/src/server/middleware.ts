@@ -8,6 +8,7 @@ import { HTTPException } from "hono/http-exception"
 import { Log } from "../util/log"
 import { Flag } from "@/flag/flag"
 import { basicAuth } from "hono/basic-auth"
+import { getCookie, setCookie } from "hono/cookie"
 import { cors } from "hono/cors"
 import { compress } from "hono/compress"
 
@@ -36,6 +37,8 @@ export const ErrorMiddleware: ErrorHandler = (err, c) => {
   })
 }
 
+const AUTH_COOKIE = "opencode_auth"
+
 export const AuthMiddleware: MiddlewareHandler = (c, next) => {
   // Allow CORS preflight requests to succeed without auth.
   // Browser clients sending Authorization headers will preflight with OPTIONS.
@@ -46,6 +49,30 @@ export const AuthMiddleware: MiddlewareHandler = (c, next) => {
 
   if (c.req.query("auth_token")) c.req.raw.headers.set("authorization", `Basic ${c.req.query("auth_token")}`)
 
+  // Auto-login for the opspace direct-mode URL (http://host:port?token=<password>).
+  // The whole SPA (HTML + assets + API) is behind Basic auth, but the browser
+  // only sends the ?token on the first navigation — assets/API requests don't
+  // carry it, so the password lives in the URL yet the user still gets a login
+  // dialog. Accept ?token here and drop a session cookie so every subsequent
+  // request authenticates without prompting. A matching Authorization header
+  // also primes the cookie (e.g. after a manual login).
+  const basicValue = Buffer.from(`${username}:${password}`).toString("base64")
+  const headerOk = c.req.header("authorization") === `Basic ${basicValue}`
+  const tokenOk = c.req.query("token") === password
+  const cookieOk = getCookie(c, AUTH_COOKIE) === basicValue
+
+  if (headerOk || tokenOk || cookieOk) {
+    if (!cookieOk) {
+      setCookie(c, AUTH_COOKIE, basicValue, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+      })
+    }
+    return next()
+  }
+
+  // Nothing matched — fall back to a Basic challenge (manual login dialog).
   return basicAuth({ username, password })(c, next)
 }
 
