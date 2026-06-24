@@ -17,6 +17,7 @@ import { type Session } from "@opencode-ai/sdk/v2/client"
 import { type LocalProject, useLayout } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { useServer } from "@/context/server"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions, workspaceKey } from "./helpers"
 import FileTree from "@/components/file-tree"
@@ -295,8 +296,49 @@ async function resolveReportSessionId(
   return undefined
 }
 
+// Path inside the workspace where report-session mappings are cached.
+// This file survives sandbox port changes and is backed up with the git repo.
+const REPORT_SESSIONS_CACHE = ".opencode-data/report-sessions.json"
+
+async function loadReportSessionsCache(
+  fileClient: { read: (input: { path: string }) => Promise<{ data?: { type?: string; content?: string } }> },
+): Promise<Record<string, string>> {
+  try {
+    const res = await fileClient.read({ path: REPORT_SESSIONS_CACHE })
+    const text = res.data?.type === "text" ? res.data.content : undefined
+    if (!text) return {}
+    const parsed = JSON.parse(text)
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>
+    }
+  } catch {
+    // file missing or unreadable — start fresh
+  }
+  return {}
+}
+
+async function saveReportSessionsCache(
+  serverHttp: { url: string; username?: string; password?: string },
+  data: Record<string, string>,
+): Promise<void> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" }
+    if (serverHttp.username && serverHttp.password) {
+      headers["Authorization"] = "Basic " + btoa(`${serverHttp.username}:${serverHttp.password}`)
+    }
+    await fetch(`${serverHttp.url}/file/content`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ path: REPORT_SESSIONS_CACHE, content: JSON.stringify(data, null, 2) }),
+    })
+  } catch {
+    // non-fatal — cache write failure doesn't break anything
+  }
+}
+
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
+  const server = useServer()
   const sync = useSync()
   const globalSync = useGlobalSync()
   const layout = useLayout()
@@ -307,6 +349,15 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
   const skills = createMemo<ReportSkillCommand[]>(() =>
     mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
   )
+
+  // Pre-populate reportSessions from the workspace file cache immediately on
+  // mount so sessions are hidden before the async backfill finishes.
+  void (async () => {
+    const cached = await loadReportSessionsCache(sdk.client.file)
+    for (const [sessionId, skillName] of Object.entries(cached)) {
+      layout.reportSessions.markReportSession(props.directory, sessionId, skillName)
+    }
+  })()
 
   const createReportSession = async (skillName: string): Promise<string | undefined> => {
     const created = await sdk.client.session
@@ -394,6 +445,17 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
             if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
           }),
         )
+        // Persist the updated mapping to a workspace file so it survives
+        // sandbox port changes (each new port = new localStorage origin).
+        if (token === backfillToken) {
+          const snapshot = Object.fromEntries(
+            [...layout.reportSessions.reportSessionIds(props.directory)].map((id) => [
+              id,
+              layout.reportSessions.reportSkillForSession(props.directory, id) ?? "",
+            ]),
+          )
+          await saveReportSessionsCache(server.current?.http ?? { url: sdk.url }, snapshot)
+        }
       } finally {
         backfillInflight = false
       }
@@ -610,7 +672,9 @@ export const SortableWorkspace = (props: {
     // doesn't grow even though hasMore stays true. Keep paging until either
     // the filtered count advances or the server runs out, with a safety cap
     // so we never page indefinitely.
-    const MAX_AUTO_PAGES = 5
+    // Using 20 instead of 5 so we can push through dense stretches of
+    // report-only pages without the user having to click "Load more" repeatedly.
+    const MAX_AUTO_PAGES = 20
     const initial = count()
     for (let i = 0; i < MAX_AUTO_PAGES; i++) {
       setWorkspaceStore("limit", (limit) => (limit ?? 0) + 5)
@@ -780,7 +844,7 @@ export const LocalWorkspace = (props: {
     // See SortableWorkspace.loadMore — keep paging while filtered count
     // stagnates so a stretch of report sessions can't strand the user with
     // an infinitely-clicking "Load more" button.
-    const MAX_AUTO_PAGES = 5
+    const MAX_AUTO_PAGES = 20
     const initial = count()
     for (let i = 0; i < MAX_AUTO_PAGES; i++) {
       workspace().setStore("limit", (limit) => (limit ?? 0) + 5)

@@ -113,8 +113,8 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
+      // props.servers last so they win over stored entries for the same URL
       const servers = [
-        ...(props.servers ?? []),
         ...store.list.map((value) =>
           typeof value === "string"
             ? {
@@ -123,6 +123,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
               }
             : value,
         ),
+        ...(props.servers ?? []),
       ]
 
       const deduped = new Map(
