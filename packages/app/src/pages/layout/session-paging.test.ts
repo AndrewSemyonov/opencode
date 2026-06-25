@@ -1,5 +1,59 @@
 import { describe, expect, test } from "bun:test"
-import { pageUntilVisibleProgress, SESSION_PAGE_SIZE } from "./session-paging"
+import { moreSessionsAvailable, pageUntilVisibleProgress, SESSION_PAGE_SIZE } from "./session-paging"
+
+describe("moreSessionsAvailable", () => {
+  const root = (id: string) => ({ id, parentID: null })
+
+  test("true when the server still reports raw hasMore", () => {
+    expect(moreSessionsAvailable({ session: [root("a")], hasMore: true, sessionTotal: 1 })).toBe(true)
+  })
+
+  test("true when more roots exist than are loaded (trimmed/report-heavy first page)", () => {
+    // 5 roots loaded, but the server has 8 — the other 3 were trimmed out and
+    // Load more must appear even though raw hasMore is false.
+    const session = Array.from({ length: 5 }, (_, i) => root(`s${i}`))
+    expect(moreSessionsAvailable({ session, hasMore: false, sessionTotal: 8 })).toBe(true)
+  })
+
+  test("false when everything is loaded — extras are only filtered reports", () => {
+    // All 6 roots are loaded; some are report sessions hidden by the sidebar,
+    // but there is nothing more to fetch, so no Load more.
+    const session = Array.from({ length: 6 }, (_, i) => root(`s${i}`))
+    expect(moreSessionsAvailable({ session, hasMore: false, sessionTotal: 6 })).toBe(false)
+  })
+
+  test("ignores child and archived sessions when counting loaded roots", () => {
+    const session = [
+      root("r1"),
+      { id: "c1", parentID: "r1" }, // child — not a root
+      { id: "a1", parentID: null, time: { archived: 123 } }, // archived root
+    ]
+    // Only 1 real loaded root; server has 3 roots → more available.
+    expect(moreSessionsAvailable({ session, hasMore: false, sessionTotal: 3 })).toBe(true)
+    // Server total equals the single loaded root → nothing more.
+    expect(moreSessionsAvailable({ session, hasMore: false, sessionTotal: 1 })).toBe(false)
+  })
+
+  test("handles missing fields gracefully", () => {
+    expect(moreSessionsAvailable({})).toBe(false)
+    expect(moreSessionsAvailable({ hasMore: true })).toBe(true)
+  })
+
+  test("converges to false as the limit grows — no permanent 'Load more'", () => {
+    // Models the global-sync trim: the store keeps only the first `limit` roots,
+    // while the server holds `total`. Each Load more raises the limit by a page.
+    const total = 8
+    let limit = SESSION_PAGE_SIZE // 5
+    const store = () => ({
+      hasMore: false,
+      sessionTotal: total,
+      session: Array.from({ length: Math.min(limit, total) }, (_, i) => ({ id: `s${i}`, parentID: null })),
+    })
+    expect(moreSessionsAvailable(store())).toBe(true) // 5 loaded < 8
+    limit += SESSION_PAGE_SIZE // 10
+    expect(moreSessionsAvailable(store())).toBe(false) // all 8 loaded → button hides
+  })
+})
 
 // Simulates the server-backed session window the sidebar pages through. `rows`
 // is the full ordered list; "r" = report session (hidden), "n" = normal chat

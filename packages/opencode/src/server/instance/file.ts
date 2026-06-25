@@ -2,8 +2,6 @@ import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import { Effect } from "effect"
 import z from "zod"
-import { mkdir, writeFile } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
 import { AppRuntime } from "../../effect/app-runtime"
 import { File } from "../../file"
 import { Ripgrep } from "../../file/ripgrep"
@@ -207,46 +205,6 @@ export const FileRoutes = lazy(() =>
           }),
         )
         return c.json(content)
-      },
-    )
-    .post(
-      "/file/content",
-      describeRoute({
-        summary: "Write file",
-        description: "Write content to a file inside the workspace directory.",
-        operationId: "file.write",
-        responses: {
-          200: {
-            description: "Success",
-            content: {
-              "application/json": {
-                schema: resolver(z.object({ ok: z.boolean() })),
-              },
-            },
-          },
-          400: {
-            description: "Bad request (path outside workspace)",
-          },
-        },
-      }),
-      validator(
-        "json",
-        z.object({
-          path: z.string(),
-          content: z.string(),
-        }),
-      ),
-      async (c) => {
-        const { path: relPath, content } = c.req.valid("json")
-        const base = Instance.directory
-        const full = resolve(join(base, relPath))
-        // Security: reject paths that escape the workspace
-        if (!full.startsWith(base + "/") && full !== base) {
-          return c.json({ error: "Path outside workspace" }, 400)
-        }
-        await mkdir(dirname(full), { recursive: true })
-        await writeFile(full, content, "utf-8")
-        return c.json({ ok: true })
       },
     ),
 )

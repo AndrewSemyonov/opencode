@@ -17,10 +17,9 @@ import { type Session } from "@opencode-ai/sdk/v2/client"
 import { type LocalProject, useLayout } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
-import { useServer } from "@/context/server"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions, workspaceKey } from "./helpers"
-import { pageUntilVisibleProgress, SESSION_PAGE_SIZE } from "./session-paging"
+import { moreSessionsAvailable, pageUntilVisibleProgress, SESSION_PAGE_SIZE } from "./session-paging"
 import FileTree from "@/components/file-tree"
 import { FileProvider } from "@/context/file"
 import { SDKProvider, useSDK } from "@/context/sdk"
@@ -297,49 +296,93 @@ async function resolveReportSessionId(
   return undefined
 }
 
-// Path inside the workspace where report-session mappings are cached.
-// This file survives sandbox port changes and is backed up with the git repo.
-const REPORT_SESSIONS_CACHE = ".opencode-data/report-sessions.json"
-
-async function loadReportSessionsCache(
-  fileClient: { read: (input: { path: string }) => Promise<{ data?: { type?: string; content?: string } }> },
-): Promise<Record<string, string>> {
-  try {
-    const res = await fileClient.read({ path: REPORT_SESSIONS_CACHE })
-    const text = res.data?.type === "text" ? res.data.content : undefined
-    if (!text) return {}
-    const parsed = JSON.parse(text)
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, string>
-    }
-  } catch {
-    // file missing or unreadable — start fresh
-  }
-  return {}
+// Report-session membership is re-derived from the workspace's committed
+// `reports/` directory while the workspace is mounted. That directory is
+// git-tracked and survives sandbox recreation, so no separate cache file is
+// needed — a previous `.opencode-data/report-sessions.json` cache never
+// persisted anyway (opspace excludes `.opencode-data/` from git/auto-commit).
+//
+// Scans `reports/`, maps each report file to its origin session, and marks
+// those sessions so the sidebar hides them from the normal chat list. Re-runs
+// whenever the report-skill list changes (e.g. as commands stream in).
+//
+// Each run bumps `token`; stale runs (superseded by a newer skill list, or by
+// the component unmounting) drop their results via the token check — so we
+// never need an "in flight" guard that could miss a later skill update.
+//
+// Marks are only ADDED, never removed: a report session is often marked before
+// its file exists (just generated, still running, or not yet committed), so
+// unmarking sessions that lack a current `reports/` file would wrongly re-expose
+// those pending report sessions in the chat list.
+function createReportSessionBackfill(input: {
+  directory: string
+  skills: Accessor<ReportSkillCommand[]>
+  sdk: ReturnType<typeof useSDK>
+  sync: ReturnType<typeof useSync>
+  layout: ReturnType<typeof useLayout>
+}): void {
+  let token = 0
+  onCleanup(() => {
+    token++ // any in-flight pass becomes a no-op
+  })
+  createEffect(() => {
+    const list = input.skills()
+    if (list.length === 0) return
+    const current = ++token // supersede any in-flight pass
+    void (async () => {
+      let files: Awaited<ReturnType<typeof input.sdk.client.file.list>>["data"]
+      try {
+        files = (await input.sdk.client.file.list({ path: "reports" })).data
+      } catch {
+        return
+      }
+      if (current !== token) return // a newer pass started, or we unmounted
+      await Promise.all(
+        (files ?? []).map(async (file) => {
+          if (!file.path || file.type === "directory") return
+          const skill = findReportSkillForFile(list, file.path)
+          if (!skill) return
+          const sid = await resolveReportSessionId(input.sdk, input.sync, file.path)
+          if (current !== token) return
+          if (sid) input.layout.reportSessions.markReportSession(input.directory, sid, skill.name)
+        }),
+      )
+    })()
+  })
 }
 
-async function saveReportSessionsCache(
-  serverHttp: { url: string; username?: string; password?: string },
-  data: Record<string, string>,
-): Promise<void> {
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
-    if (serverHttp.username && serverHttp.password) {
-      headers["Authorization"] = "Basic " + btoa(`${serverHttp.username}:${serverHttp.password}`)
-    }
-    await fetch(`${serverHttp.url}/file/content`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ path: REPORT_SESSIONS_CACHE, content: JSON.stringify(data, null, 2) }),
-    })
-  } catch {
-    // non-fatal — cache write failure doesn't break anything
-  }
+// Headless: runs the report-session backfill for a workspace. Mounted whenever
+// the workspace is expanded — NOT gated behind the (collapsed-by-default)
+// Reports subsection — so report sessions are marked and hidden from the chat
+// list even when the user never opens Reports.
+const WorkspaceReportSessionsSyncBody = (props: { directory: string }): JSX.Element => {
+  const sdk = useSDK()
+  const sync = useSync()
+  const layout = useLayout()
+  const [workspaceSkills] = createResource(
+    () => props.directory,
+    () => loadWorkspaceReportSkills(sdk.client.file),
+  )
+  const skills = createMemo<ReportSkillCommand[]>(() =>
+    mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
+  )
+  createReportSessionBackfill({ directory: props.directory, skills, sdk, sync, layout })
+  return null
+}
+
+const WorkspaceReportSessionsSync = (props: { directory: string }): JSX.Element => {
+  const directory = createMemo(() => props.directory)
+  return (
+    <SDKProvider directory={directory}>
+      <SyncProvider>
+        <WorkspaceReportSessionsSyncBody directory={props.directory} />
+      </SyncProvider>
+    </SDKProvider>
+  )
 }
 
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
-  const server = useServer()
   const sync = useSync()
   const globalSync = useGlobalSync()
   const layout = useLayout()
@@ -350,15 +393,6 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
   const skills = createMemo<ReportSkillCommand[]>(() =>
     mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
   )
-
-  // Pre-populate reportSessions from the workspace file cache immediately on
-  // mount so sessions are hidden before the async backfill finishes.
-  void (async () => {
-    const cached = await loadReportSessionsCache(sdk.client.file)
-    for (const [sessionId, skillName] of Object.entries(cached)) {
-      layout.reportSessions.markReportSession(props.directory, sessionId, skillName)
-    }
-  })()
 
   const createReportSession = async (skillName: string): Promise<string | undefined> => {
     const created = await sdk.client.session
@@ -414,54 +448,6 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     requestOpenFile({ kind: "report", path, sessionId: created })
     navigate(`/${slug()}/session/${created}`)
   }
-
-  let backfillInflight = false
-  let backfillToken = 0
-  onCleanup(() => {
-    backfillToken++ // any in-flight pass becomes a no-op
-  })
-  createEffect(() => {
-    const list = skills()
-    if (list.length === 0) return
-    if (backfillInflight) return // another pass is already running; skip
-    backfillInflight = true
-    const token = ++backfillToken
-    void (async () => {
-      try {
-        let files: Awaited<ReturnType<typeof sdk.client.file.list>>["data"]
-        try {
-          files = (await sdk.client.file.list({ path: "reports" })).data
-        } catch {
-          return
-        }
-        // If a newer pass started or the component unmounted, drop results.
-        if (token !== backfillToken) return
-        await Promise.all(
-          (files ?? []).map(async (file) => {
-            if (!file.path || file.type === "directory") return
-            const skill = findReportSkillForFile(list, file.path)
-            if (!skill) return
-            const sid = await resolveReportSessionId(sdk, sync, file.path)
-            if (token !== backfillToken) return
-            if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
-          }),
-        )
-        // Persist the updated mapping to a workspace file so it survives
-        // sandbox port changes (each new port = new localStorage origin).
-        if (token === backfillToken) {
-          const snapshot = Object.fromEntries(
-            [...layout.reportSessions.reportSessionIds(props.directory)].map((id) => [
-              id,
-              layout.reportSessions.reportSkillForSession(props.directory, id) ?? "",
-            ]),
-          )
-          await saveReportSessionsCache(server.current?.http ?? { url: sdk.url }, snapshot)
-        }
-      } finally {
-        backfillInflight = false
-      }
-    })()
-  })
 
   return (
     <div class="px-2 pb-2 flex flex-col gap-0.5">
@@ -661,7 +647,7 @@ export const SortableWorkspace = (props: {
   const boot = createMemo(() => open() || active())
   const booted = createMemo((prev) => prev || workspaceStore.status === "complete", false)
   const count = createMemo(() => sessions()?.length ?? 0)
-  const hasMore = createMemo(() => workspaceStore.hasMore)
+  const hasMore = createMemo(() => moreSessionsAvailable(workspaceStore))
   const busy = createMemo(() => props.ctx.isBusy(props.directory))
   const wasBusy = createMemo((prev) => prev || busy(), false)
   const loading = createMemo(() => open() && !booted() && count() === 0 && !wasBusy())
@@ -671,7 +657,7 @@ export const SortableWorkspace = (props: {
     pageUntilVisibleProgress({
       visibleCount: count,
       rawCount: () => workspaceStore.session?.length ?? 0,
-      hasMore: () => workspaceStore.hasMore,
+      hasMore,
       bumpLimit: () => setWorkspaceStore("limit", (limit) => (limit ?? 0) + SESSION_PAGE_SIZE),
       reload: () => globalSync.project.loadSessions(props.directory),
     })
@@ -683,7 +669,7 @@ export const SortableWorkspace = (props: {
   let autoSurfaced = false
   createEffect(() => {
     if (autoSurfaced || !booted()) return
-    if (count() > 0 || !workspaceStore.hasMore) {
+    if (count() > 0 || !hasMore()) {
       autoSurfaced = true
       return
     }
@@ -783,6 +769,9 @@ export const SortableWorkspace = (props: {
         </div>
 
         <Collapsible.Content>
+          {/* Headless: marks report sessions so they're hidden from the chat
+              list, regardless of whether the Reports section is open. */}
+          <WorkspaceReportSessionsSync directory={props.directory} />
           <WorkspaceSubsection
             label={language.t("sidebar.heading.chats")}
             open={() => props.ctx.workspaceChatsExpanded(props.directory)}
@@ -846,12 +835,12 @@ export const LocalWorkspace = (props: {
   const booted = createMemo((prev) => prev || workspace().store.status === "complete", false)
   const count = createMemo(() => sessions()?.length ?? 0)
   const loading = createMemo(() => !booted() && count() === 0)
-  const hasMore = createMemo(() => workspace().store.hasMore)
+  const hasMore = createMemo(() => moreSessionsAvailable(workspace().store))
   const loadMore = () =>
     pageUntilVisibleProgress({
       visibleCount: count,
       rawCount: () => workspace().store.session?.length ?? 0,
-      hasMore: () => workspace().store.hasMore,
+      hasMore,
       bumpLimit: () => workspace().setStore("limit", (limit) => (limit ?? 0) + SESSION_PAGE_SIZE),
       reload: () => globalSync.project.loadSessions(props.project.worktree),
     })
@@ -861,7 +850,7 @@ export const LocalWorkspace = (props: {
   let autoSurfaced = false
   createEffect(() => {
     if (autoSurfaced || !booted()) return
-    if (count() > 0 || !workspace().store.hasMore) {
+    if (count() > 0 || !hasMore()) {
       autoSurfaced = true
       return
     }
@@ -874,6 +863,8 @@ export const LocalWorkspace = (props: {
       ref={(el) => props.ctx.setScrollContainerRef(el, props.mobile)}
       class="flex flex-col [overflow-anchor:none]"
     >
+      {/* Headless: mark report sessions so they're hidden from the chat list. */}
+      <WorkspaceReportSessionsSync directory={props.project.worktree} />
       <WorkspaceSessionList
         slug={slug}
         mobile={props.mobile}
