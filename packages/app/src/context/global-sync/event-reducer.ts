@@ -115,17 +115,13 @@ export function applyDirectoryEvent(input: {
       input.setStore("session", reconcile(trimmed, { key: "id" }))
       cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
       if (!info.parentID) {
+        // A newly created root session is already in the store, so there is
+        // nothing left to fetch from the server. "Load more" visibility is
+        // derived by moreSessionsAvailable (server hasMore, or sessionTotal vs
+        // loaded roots). Flipping hasMore here used to surface a spurious
+        // "Load more" the moment total roots (chats + hidden report sessions)
+        // grew past the page limit, even though every chat was already visible.
         input.setStore("sessionTotal", (value) => value + 1)
-        // hasMore is the sole gate for the sidebar "Load more" button after
-        // this PR. The initial load wires it via session.list, but new
-        // sessions arriving via the event channel could otherwise leave it
-        // stale at false even though we've grown past the visible window.
-        // If the new state has more non-archived roots than limit, flip on.
-        const limit = input.store.limit
-        if (limit && limit > 0) {
-          const visibleRoots = next.filter((s) => !s.parentID && !s.time?.archived).length
-          if (visibleRoots > limit) input.setStore("hasMore", true)
-        }
       }
       break
     }
