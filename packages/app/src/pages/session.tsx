@@ -41,7 +41,7 @@ import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
-import { OpenLocalFileProvider } from "@opencode-ai/ui/context/file"
+import { OpenLocalFileProvider, OpenReportProvider } from "@opencode-ai/ui/context/file"
 import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
@@ -2022,6 +2022,7 @@ export default function Page() {
   })
 
   return (
+    <OpenReportProvider value={(path) => requestOpenFile({ kind: "report", path, sessionId: params.id })}>
     <OpenLocalFileProvider value={openReviewFile}>
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
       <SessionHeader
@@ -2215,5 +2216,6 @@ export default function Page() {
       <TerminalPanel />
     </div>
     </OpenLocalFileProvider>
+    </OpenReportProvider>
   )
 }

@@ -1,6 +1,6 @@
 import { useMarked } from "../context/marked"
 import { useI18n } from "../context/i18n"
-import { useOpenLocalFile } from "../context/file"
+import { useOpenLocalFile, useOpenReport } from "../context/file"
 import DOMPurify from "dompurify"
 import morphdom from "morphdom"
 import { checksum } from "@opencode-ai/shared/util/encode"
@@ -392,16 +392,57 @@ function markPlainPaths(root: HTMLDivElement) {
   }
 }
 
-function decorate(root: HTMLDivElement, labels: CopyLabels) {
+// Report references in chat (`reports/<name>.mdx`) render as a button that opens
+// the MDX viewer, not as a raw filename link. The visible date comes from the
+// link text the agent writes (`[<date>](reports/...mdx)`); for a bare path we
+// fall back to the date embedded in the filename.
+export function isReportPath(path: string): boolean {
+  // Tolerate the trailing ?start=&end= that previewablePath() appends for
+  // line-anchored links (reports/x.mdx:12).
+  return /^(?:\.\/)?reports\/[^?]+\.mdx(?:\?|$)/i.test(path)
+}
+
+// The button's date comes from the link text the agent writes
+// ([<date>](reports/...mdx)). A bare auto-linked path has previewable text — we
+// show no date then, because the filename carries the generation timestamp,
+// which can differ from the report's data period and would mislead.
+export function reportLinkDate(linkText: string): string {
+  const text = linkText.trim()
+  return !text || previewablePath(text) ? "" : text
+}
+
+function markReportLinks(root: HTMLDivElement, reportLabel: (date: string) => string) {
+  for (const anchor of Array.from(root.querySelectorAll("a"))) {
+    if (!(anchor instanceof HTMLAnchorElement)) continue
+    const path = previewablePath(anchor.getAttribute("href") ?? "")
+    if (!path || !isReportPath(path)) continue
+
+    // Idempotent across re-renders: decorate() always runs on a freshly parsed
+    // node, so the original date text is re-read each time, never the prefix.
+    anchor.textContent = reportLabel(reportLinkDate(anchor.textContent ?? ""))
+    anchor.classList.add("report-open-link")
+    anchor.classList.remove("external-link")
+    anchor.removeAttribute("target")
+    anchor.removeAttribute("rel")
+    anchor.setAttribute("role", "button")
+  }
+}
+
+function decorate(root: HTMLDivElement, labels: CopyLabels, reportLabel: (date: string) => string) {
   const blocks = Array.from(root.querySelectorAll("pre"))
   for (const block of blocks) {
     ensureCodeWrapper(block, labels)
   }
   markCodeLinks(root)
   markPlainPaths(root)
+  markReportLinks(root, reportLabel)
 }
 
-function setupLinkInterception(root: HTMLDivElement, openLocalFile: (path: string) => void) {
+function setupLinkInterception(
+  root: HTMLDivElement,
+  openLocalFile: (path: string) => void,
+  openReport: ((path: string) => void) | undefined,
+) {
   const handleClick = (event: MouseEvent) => {
     if (event.defaultPrevented) return
     if (event.button !== 0) return
@@ -419,6 +460,10 @@ function setupLinkInterception(root: HTMLDivElement, openLocalFile: (path: strin
     if (!path) return
 
     event.preventDefault()
+    if (openReport && isReportPath(path)) {
+      openReport(path)
+      return
+    }
     openLocalFile(path)
   }
 
@@ -494,6 +539,7 @@ export function Markdown(
   const marked = useMarked()
   const i18n = useI18n()
   const openLocalFile = useOpenLocalFile()
+  const openReport = useOpenReport()
   const [root, setRoot] = createSignal<HTMLDivElement>()
   const [html] = createResource(
     () => ({
@@ -551,7 +597,10 @@ export function Markdown(
     }
     const temp = document.createElement("div")
     temp.innerHTML = content
-    decorate(temp, labels)
+    // `session.report.display` is provided by the app's i18n dictionary (the app
+    // bridges its translator into this UI provider); ui's own dictionary has no
+    // session.* keys.
+    decorate(temp, labels, (date) => i18n.t("session.report.display", { date }).trim())
 
     morphdom(container, temp, {
       childrenOnly: true,
@@ -576,7 +625,7 @@ export function Markdown(
         copied: i18n.t("ui.message.copied"),
       }))
 
-    if (!linkCleanup) linkCleanup = setupLinkInterception(container, openLocalFile)
+    if (!linkCleanup) linkCleanup = setupLinkInterception(container, openLocalFile, openReport)
   })
 
   onCleanup(() => {
