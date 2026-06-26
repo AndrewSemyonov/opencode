@@ -165,6 +165,33 @@ describe("applyDirectoryEvent", () => {
     expect(store.sessionTotal).toBe(2)
   })
 
+  test("creating a root past the limit does not surface a spurious 'Load more'", () => {
+    // Regression: every loaded root is already in the store, so creating one
+    // more must not flip hasMore on. Otherwise the sidebar showed a "Load more"
+    // button the moment total roots grew past the page limit, even though all
+    // chats were visible and there was nothing left to fetch.
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "a" }), rootSession({ id: "b" })],
+        sessionTotal: 2,
+        limit: 2,
+        hasMore: false,
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "session.created", properties: { info: rootSession({ id: "c" }) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.sessionTotal).toBe(3)
+    expect(store.hasMore).toBe(false)
+  })
+
   test("cleans session caches when archived", () => {
     const message = userMessage("msg_1", "ses_1")
     const [store, setStore] = createStore(

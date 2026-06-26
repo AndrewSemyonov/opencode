@@ -19,6 +19,7 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions, workspaceKey } from "./helpers"
+import { moreSessionsAvailable, pageUntilVisibleProgress, SESSION_PAGE_SIZE } from "./session-paging"
 import FileTree from "@/components/file-tree"
 import { FileProvider } from "@/context/file"
 import { SDKProvider, useSDK } from "@/context/sdk"
@@ -295,6 +296,91 @@ async function resolveReportSessionId(
   return undefined
 }
 
+// Report-session membership is re-derived from the workspace's committed
+// `reports/` directory while the workspace is mounted. That directory is
+// git-tracked and survives sandbox recreation, so no separate cache file is
+// needed — a previous `.opencode-data/report-sessions.json` cache never
+// persisted anyway (opspace excludes `.opencode-data/` from git/auto-commit).
+//
+// Scans `reports/`, maps each report file to its origin session, and marks
+// those sessions so the sidebar hides them from the normal chat list. Re-runs
+// whenever the report-skill list changes (e.g. as commands stream in).
+//
+// Each run bumps `token`; stale runs (superseded by a newer skill list, or by
+// the component unmounting) drop their results via the token check — so we
+// never need an "in flight" guard that could miss a later skill update.
+//
+// Marks are only ADDED, never removed: a report session is often marked before
+// its file exists (just generated, still running, or not yet committed), so
+// unmarking sessions that lack a current `reports/` file would wrongly re-expose
+// those pending report sessions in the chat list.
+function createReportSessionBackfill(input: {
+  directory: string
+  skills: Accessor<ReportSkillCommand[]>
+  sdk: ReturnType<typeof useSDK>
+  sync: ReturnType<typeof useSync>
+  layout: ReturnType<typeof useLayout>
+}): void {
+  let token = 0
+  onCleanup(() => {
+    token++ // any in-flight pass becomes a no-op
+  })
+  createEffect(() => {
+    const list = input.skills()
+    if (list.length === 0) return
+    const current = ++token // supersede any in-flight pass
+    void (async () => {
+      let files: Awaited<ReturnType<typeof input.sdk.client.file.list>>["data"]
+      try {
+        files = (await input.sdk.client.file.list({ path: "reports" })).data
+      } catch {
+        return
+      }
+      if (current !== token) return // a newer pass started, or we unmounted
+      await Promise.all(
+        (files ?? []).map(async (file) => {
+          if (!file.path || file.type === "directory") return
+          const skill = findReportSkillForFile(list, file.path)
+          if (!skill) return
+          const sid = await resolveReportSessionId(input.sdk, input.sync, file.path)
+          if (current !== token) return
+          if (sid) input.layout.reportSessions.markReportSession(input.directory, sid, skill.name)
+        }),
+      )
+    })()
+  })
+}
+
+// Headless: runs the report-session backfill for a workspace. Mounted whenever
+// the workspace is expanded — NOT gated behind the (collapsed-by-default)
+// Reports subsection — so report sessions are marked and hidden from the chat
+// list even when the user never opens Reports.
+const WorkspaceReportSessionsSyncBody = (props: { directory: string }): JSX.Element => {
+  const sdk = useSDK()
+  const sync = useSync()
+  const layout = useLayout()
+  const [workspaceSkills] = createResource(
+    () => props.directory,
+    () => loadWorkspaceReportSkills(sdk.client.file),
+  )
+  const skills = createMemo<ReportSkillCommand[]>(() =>
+    mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
+  )
+  createReportSessionBackfill({ directory: props.directory, skills, sdk, sync, layout })
+  return null
+}
+
+const WorkspaceReportSessionsSync = (props: { directory: string }): JSX.Element => {
+  const directory = createMemo(() => props.directory)
+  return (
+    <SDKProvider directory={directory}>
+      <SyncProvider>
+        <WorkspaceReportSessionsSyncBody directory={props.directory} />
+      </SyncProvider>
+    </SDKProvider>
+  )
+}
+
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
   const sync = useSync()
@@ -362,43 +448,6 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     requestOpenFile({ kind: "report", path, sessionId: created })
     navigate(`/${slug()}/session/${created}`)
   }
-
-  let backfillInflight = false
-  let backfillToken = 0
-  onCleanup(() => {
-    backfillToken++ // any in-flight pass becomes a no-op
-  })
-  createEffect(() => {
-    const list = skills()
-    if (list.length === 0) return
-    if (backfillInflight) return // another pass is already running; skip
-    backfillInflight = true
-    const token = ++backfillToken
-    void (async () => {
-      try {
-        let files: Awaited<ReturnType<typeof sdk.client.file.list>>["data"]
-        try {
-          files = (await sdk.client.file.list({ path: "reports" })).data
-        } catch {
-          return
-        }
-        // If a newer pass started or the component unmounted, drop results.
-        if (token !== backfillToken) return
-        await Promise.all(
-          (files ?? []).map(async (file) => {
-            if (!file.path || file.type === "directory") return
-            const skill = findReportSkillForFile(list, file.path)
-            if (!skill) return
-            const sid = await resolveReportSessionId(sdk, sync, file.path)
-            if (token !== backfillToken) return
-            if (sid) layout.reportSessions.markReportSession(props.directory, sid, skill.name)
-          }),
-        )
-      } finally {
-        backfillInflight = false
-      }
-    })()
-  })
 
   return (
     <div class="px-2 pb-2 flex flex-col gap-0.5">
@@ -598,27 +647,35 @@ export const SortableWorkspace = (props: {
   const boot = createMemo(() => open() || active())
   const booted = createMemo((prev) => prev || workspaceStore.status === "complete", false)
   const count = createMemo(() => sessions()?.length ?? 0)
-  const hasMore = createMemo(() => workspaceStore.hasMore)
+  const hasMore = createMemo(() => moreSessionsAvailable(workspaceStore))
   const busy = createMemo(() => props.ctx.isBusy(props.directory))
   const wasBusy = createMemo((prev) => prev || busy(), false)
   const loading = createMemo(() => open() && !booted() && count() === 0 && !wasBusy())
   const touch = createMediaQuery("(hover: none)")
   const showNew = createMemo(() => !loading() && (touch() || count() === 0 || (active() && !params.id)))
-  const loadMore = async () => {
-    // hasMore reflects raw server rows, but the visible list filters out
-    // report sessions. A page can consist entirely of reports → count
-    // doesn't grow even though hasMore stays true. Keep paging until either
-    // the filtered count advances or the server runs out, with a safety cap
-    // so we never page indefinitely.
-    const MAX_AUTO_PAGES = 5
-    const initial = count()
-    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
-      setWorkspaceStore("limit", (limit) => (limit ?? 0) + 5)
-      await globalSync.project.loadSessions(props.directory)
-      if (!workspaceStore.hasMore) return
-      if (count() > initial) return
+  const loadMore = () =>
+    pageUntilVisibleProgress({
+      visibleCount: count,
+      rawCount: () => workspaceStore.session?.length ?? 0,
+      hasMore,
+      bumpLimit: () => setWorkspaceStore("limit", (limit) => (limit ?? 0) + SESSION_PAGE_SIZE),
+      reload: () => globalSync.project.loadSessions(props.directory),
+    })
+
+  // When the freshest page is entirely report sessions, the visible list can be
+  // empty even though normal chats exist further down. Surface the first real
+  // page automatically so the user never faces a misleadingly empty workspace
+  // with no obvious way forward. Guarded so it runs at most once per mount.
+  let autoSurfaced = false
+  createEffect(() => {
+    if (autoSurfaced || !booted()) return
+    if (count() > 0 || !hasMore()) {
+      autoSurfaced = true
+      return
     }
-  }
+    autoSurfaced = true
+    void loadMore()
+  })
 
   const workspaceEditActive = createMemo(() => props.ctx.editorOpen(`workspace:${props.directory}`))
   const header = () => (
@@ -712,6 +769,9 @@ export const SortableWorkspace = (props: {
         </div>
 
         <Collapsible.Content>
+          {/* Headless: marks report sessions so they're hidden from the chat
+              list, regardless of whether the Reports section is open. */}
+          <WorkspaceReportSessionsSync directory={props.directory} />
           <WorkspaceSubsection
             label={language.t("sidebar.heading.chats")}
             open={() => props.ctx.workspaceChatsExpanded(props.directory)}
@@ -775,26 +835,36 @@ export const LocalWorkspace = (props: {
   const booted = createMemo((prev) => prev || workspace().store.status === "complete", false)
   const count = createMemo(() => sessions()?.length ?? 0)
   const loading = createMemo(() => !booted() && count() === 0)
-  const hasMore = createMemo(() => workspace().store.hasMore)
-  const loadMore = async () => {
-    // See SortableWorkspace.loadMore — keep paging while filtered count
-    // stagnates so a stretch of report sessions can't strand the user with
-    // an infinitely-clicking "Load more" button.
-    const MAX_AUTO_PAGES = 5
-    const initial = count()
-    for (let i = 0; i < MAX_AUTO_PAGES; i++) {
-      workspace().setStore("limit", (limit) => (limit ?? 0) + 5)
-      await globalSync.project.loadSessions(props.project.worktree)
-      if (!workspace().store.hasMore) return
-      if (count() > initial) return
+  const hasMore = createMemo(() => moreSessionsAvailable(workspace().store))
+  const loadMore = () =>
+    pageUntilVisibleProgress({
+      visibleCount: count,
+      rawCount: () => workspace().store.session?.length ?? 0,
+      hasMore,
+      bumpLimit: () => workspace().setStore("limit", (limit) => (limit ?? 0) + SESSION_PAGE_SIZE),
+      reload: () => globalSync.project.loadSessions(props.project.worktree),
+    })
+
+  // See SortableWorkspace — surface the first page of visible sessions when the
+  // newest rows are all report sessions, so the workspace never looks empty.
+  let autoSurfaced = false
+  createEffect(() => {
+    if (autoSurfaced || !booted()) return
+    if (count() > 0 || !hasMore()) {
+      autoSurfaced = true
+      return
     }
-  }
+    autoSurfaced = true
+    void loadMore()
+  })
 
   return (
     <div
       ref={(el) => props.ctx.setScrollContainerRef(el, props.mobile)}
       class="flex flex-col [overflow-anchor:none]"
     >
+      {/* Headless: mark report sessions so they're hidden from the chat list. */}
+      <WorkspaceReportSessionsSync directory={props.project.worktree} />
       <WorkspaceSessionList
         slug={slug}
         mobile={props.mobile}

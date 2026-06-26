@@ -125,8 +125,34 @@ const platform: Platform = {
   setDefaultServer: writeDefaultServerUrl,
 }
 
+// Extract ?token= from URL for auto-authentication (opspace direct mode).
+// The token is the opencode server password injected by the opspace backend.
+// We strip it from the URL immediately so it doesn't linger in browser history.
+const extractUrlToken = (): string | null => {
+  try {
+    const params = new URLSearchParams(location.search)
+    const token = params.get("token")
+    if (!token) return null
+    // Clean token + next from the address bar without adding a history entry
+    params.delete("token")
+    params.delete("next")
+    const qs = params.toString()
+    const cleanUrl = location.pathname + (qs ? `?${qs}` : "") + location.hash
+    history.replaceState(null, "", cleanUrl)
+    return token
+  } catch {
+    return null
+  }
+}
+
 if (root instanceof HTMLElement) {
-  const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
+  const urlToken = extractUrlToken()
+  const serverHttp: ServerConnection.Http["http"] = { url: getCurrentUrl() }
+  if (urlToken) {
+    serverHttp.username = "opencode"
+    serverHttp.password = urlToken
+  }
+  const server: ServerConnection.Http = { type: "http", http: serverHttp }
   render(
     () => (
       <PlatformProvider value={platform}>

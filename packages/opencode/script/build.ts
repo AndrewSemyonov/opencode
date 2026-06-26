@@ -141,7 +141,13 @@ const allTargets: {
   },
 ]
 
-const targets = singleFlag
+// --only=<os>-<arch> builds a single explicit target (e.g. cross-compiling
+// a linux binary from macOS). Without it the choices are --single (host only)
+// or all 12 targets.
+const onlyTarget = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length)
+const targets: typeof allTargets = onlyTarget
+  ? [{ os: onlyTarget.split("-")[0]!, arch: onlyTarget.split("-")[1] as "arm64" | "x64" }]
+  : singleFlag
   ? allTargets.filter((item) => {
       if (item.os !== process.platform || item.arch !== process.arch) {
         return false
