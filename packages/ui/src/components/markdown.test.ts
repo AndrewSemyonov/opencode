@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { dict as uiEn } from "../i18n/en"
 import { isReportPath, previewablePath, reportLinkDate } from "./markdown"
 
 describe("previewablePath", () => {
@@ -76,5 +77,14 @@ describe("reportLinkDate", () => {
     expect(reportLinkDate("reports/guests-2026-06-22-11:54.mdx")).toBe("")
     expect(reportLinkDate("./reports/report.mdx")).toBe("")
     expect(reportLinkDate("")).toBe("")
+  })
+})
+
+describe("report button label fallback", () => {
+  // Markdown can render without the app i18n provider; the ui dictionary must
+  // carry session.report.display so the button shows a label, not the raw key.
+  test("ui dictionary defines the report-open label with a date placeholder", () => {
+    expect(uiEn["session.report.display"]).toBeDefined()
+    expect(uiEn["session.report.display"]).toContain("{{date}}")
   })
 })

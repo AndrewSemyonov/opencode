@@ -597,9 +597,9 @@ export function Markdown(
     }
     const temp = document.createElement("div")
     temp.innerHTML = content
-    // `session.report.display` is provided by the app's i18n dictionary (the app
-    // bridges its translator into this UI provider); ui's own dictionary has no
-    // session.* keys.
+    // `session.report.display`: the app's i18n dictionary provides the localized
+    // value via the bridged translator; the ui dictionary carries an English
+    // fallback so standalone Markdown (no app provider) doesn't render the raw key.
     decorate(temp, labels, (date) => i18n.t("session.report.display", { date }).trim())
 
     morphdom(container, temp, {
