@@ -394,8 +394,8 @@ function markPlainPaths(root: HTMLDivElement) {
 
 // Report references in chat (`reports/<name>.mdx`) render as a button that opens
 // the MDX viewer, not as a raw filename link. The visible date comes from the
-// link text the agent writes (`[<date>](reports/...mdx)`); for a bare path we
-// fall back to the date embedded in the filename.
+// link text the agent writes (`[<date>](reports/...mdx)`); a bare path shows no
+// date (see reportLinkDate).
 export function isReportPath(path: string): boolean {
   // Tolerate the trailing ?start=&end= that previewablePath() appends for
   // line-anchored links (reports/x.mdx:12).
@@ -411,7 +411,7 @@ export function reportLinkDate(linkText: string): string {
   return !text || previewablePath(text) ? "" : text
 }
 
-function markReportLinks(root: HTMLDivElement, reportLabel: (date: string) => string) {
+export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string) => string) {
   for (const anchor of Array.from(root.querySelectorAll("a"))) {
     if (!(anchor instanceof HTMLAnchorElement)) continue
     const path = previewablePath(anchor.getAttribute("href") ?? "")
@@ -438,7 +438,7 @@ function decorate(root: HTMLDivElement, labels: CopyLabels, reportLabel: (date: 
   markReportLinks(root, reportLabel)
 }
 
-function setupLinkInterception(
+export function setupLinkInterception(
   root: HTMLDivElement,
   openLocalFile: (path: string) => void,
   openReport: ((path: string) => void) | undefined,

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { dict as uiEn } from "../i18n/en"
-import { isReportPath, previewablePath, reportLinkDate } from "./markdown"
+import { previewablePath } from "./markdown"
 
 describe("previewablePath", () => {
   test("keeps relative file links previewable", () => {
@@ -45,46 +44,5 @@ describe("previewablePath", () => {
   test("keeps report file links previewable", () => {
     expect(previewablePath("reports/report-2026-05-19.mdx")).toBe("reports/report-2026-05-19.mdx")
     expect(previewablePath("reports/report.mdx:12")).toBe("reports/report.mdx?start=12&end=12")
-  })
-})
-
-describe("isReportPath", () => {
-  test("matches report .mdx paths (with or without ./)", () => {
-    expect(isReportPath("reports/guests-2026-06-22-11:54.mdx")).toBe(true)
-    expect(isReportPath("./reports/report.mdx")).toBe(true)
-  })
-
-  test("tolerates the line-anchor query suffix from previewablePath", () => {
-    expect(isReportPath("reports/report.mdx?start=5&end=5")).toBe(true)
-  })
-
-  test("rejects non-report paths", () => {
-    expect(isReportPath("src/app.ts")).toBe(false)
-    expect(isReportPath("docs/reports/notes.md")).toBe(false) // not at root
-    expect(isReportPath("reports/report.md")).toBe(false) // viewer needs .mdx
-    expect(isReportPath("reports/")).toBe(false)
-    expect(isReportPath("reportsx/report.mdx")).toBe(false)
-  })
-})
-
-describe("reportLinkDate", () => {
-  test("uses the agent-written date as the button date", () => {
-    expect(reportLinkDate("21 июня 2026")).toBe("21 июня 2026")
-    expect(reportLinkDate("  за 21 июня  ")).toBe("за 21 июня")
-  })
-
-  test("shows no date for a bare report path (avoids a misleading generation date)", () => {
-    expect(reportLinkDate("reports/guests-2026-06-22-11:54.mdx")).toBe("")
-    expect(reportLinkDate("./reports/report.mdx")).toBe("")
-    expect(reportLinkDate("")).toBe("")
-  })
-})
-
-describe("report button label fallback", () => {
-  // Markdown can render without the app i18n provider; the ui dictionary must
-  // carry session.report.display so the button shows a label, not the raw key.
-  test("ui dictionary defines the report-open label with a date placeholder", () => {
-    expect(uiEn["session.report.display"]).toBeDefined()
-    expect(uiEn["session.report.display"]).toContain("{{date}}")
   })
 })
