@@ -165,4 +165,8 @@ export const dict: Record<string, string> = {
   "ui.question.multiHint": "Select all answers that apply",
   "ui.question.singleHint": "Select one answer",
   "ui.question.custom.placeholder": "Type your answer...",
+  // Fallback for the report-open button label when Markdown renders without the
+  // app i18n provider. The app dictionary provides the localized value (ru/en);
+  // this keeps the button from showing the raw key in standalone UI usage.
+  "session.report.display": "Open report {{date}}",
 }

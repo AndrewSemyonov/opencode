@@ -21,3 +21,18 @@ export function OpenLocalFileProvider(props: ParentProps<{ value: OpenLocalFile 
 export function useOpenLocalFile(): OpenLocalFile {
   return useContext(openLocalFileCtx)
 }
+
+// Opening a report should render the MDX viewer, not a raw file tab. The app
+// wires this to requestOpenFile({ kind: "report", ... }); markdown falls back
+// to openLocalFile when no provider is present (e.g. outside a session).
+export type OpenReport = (path: string) => void
+
+const openReportCtx = createContext<OpenReport | undefined>(undefined)
+
+export function OpenReportProvider(props: ParentProps<{ value: OpenReport }>) {
+  return <openReportCtx.Provider value={props.value}>{props.children}</openReportCtx.Provider>
+}
+
+export function useOpenReport(): OpenReport | undefined {
+  return useContext(openReportCtx)
+}

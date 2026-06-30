@@ -242,6 +242,7 @@ export const dict = {
   "session.report.starting": "Starting…",
   "session.report.notGenerated": "Report not generated yet",
   "session.report.userMessage": "Generate {{title}}",
+  "session.report.display": "Open report {{date}}",
 
   "prompt.example.1": "Fix a TODO in the codebase",
   "prompt.example.2": "What is the tech stack of this project?",

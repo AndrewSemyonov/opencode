@@ -522,6 +522,7 @@ export const dict = {
   "session.report.starting": "Запускаю…",
   "session.report.notGenerated": "Отчёт ещё не сгенерирован",
   "session.report.userMessage": "Сгенерировать {{title}}",
+  "session.report.display": "Отобразить отчёт {{date}}",
   "session.todo.title": "Задачи",
   "session.todo.collapse": "Свернуть",
   "session.todo.expand": "Развернуть",
