@@ -26,13 +26,12 @@ import { SDKProvider, useSDK } from "@/context/sdk"
 import { SyncProvider, useSync } from "@/context/sync"
 import { requestOpenFile } from "@/pages/session/pending-file-open"
 import {
-  expectedReportPath,
   extractSessionIdFromReport,
-  findLatestReportFileForSkill,
   findReportSkillForFile,
   findSessionIdByReportPath,
   loadWorkspaceReportSkills,
   mergeReportSkills,
+  reportOpenTarget,
   reportSkillCommands,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
@@ -422,30 +421,34 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
   }
 
   const open = async (skill: ReportSkillCommand) => {
-    let path: string | undefined
-    try {
-      const res = await sdk.client.file.list({ path: "reports" })
-      path = findLatestReportFileForSkill(res.data, skill.name)
-    } catch {
-      path = undefined
+    const files = await sdk.client.file
+      .list({ path: "reports" })
+      .then((r) => r.data)
+      .catch(() => undefined)
+    // Open the right-hand panel only when a generated report file exists; for a
+    // not-yet-generated skill there is nothing to show, so just navigate into the
+    // session (the single "Generate" CTA lives in the composer). This gate is
+    // sidebar-local — session.tsx still auto-opens an existing report on generation.
+    const { path, open: showPanel } = reportOpenTarget(files, skill.name)
+    const openPanel = (sessionId: string) => {
+      if (showPanel) requestOpenFile({ kind: "report", path, sessionId })
     }
-    if (!path) path = expectedReportPath(skill.name)
     const target = await resolveReportSessionId(sdk, sync, path)
     if (target) {
       layout.reportSessions.markReportSession(props.directory, target, skill.name)
-      requestOpenFile({ kind: "report", path, sessionId: target })
+      openPanel(target)
       navigate(`/${slug()}/session/${target}`)
       return
     }
     const pending = existingPendingSession(skill.name)
     if (pending) {
-      requestOpenFile({ kind: "report", path, sessionId: pending })
+      openPanel(pending)
       navigate(`/${slug()}/session/${pending}`)
       return
     }
     const created = await createReportSession(skill.name)
     if (!created) return
-    requestOpenFile({ kind: "report", path, sessionId: created })
+    openPanel(created)
     navigate(`/${slug()}/session/${created}`)
   }
 
