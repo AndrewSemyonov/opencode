@@ -259,6 +259,69 @@ describe("tool.bash permissions", () => {
     })
   })
 
+  each("asks for delete permission for rm commands", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        const err = new Error("stop after permission")
+        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+        await expect(
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: "rm notes.txt",
+                description: "Remove notes file",
+              },
+              capture(requests, err),
+            ),
+          ),
+        ).rejects.toThrow(err.message)
+        const deleteReq = requests.find((r) => r.permission === "delete")
+        expect(deleteReq).toBeDefined()
+        expect(deleteReq!.patterns.some((p) => p.endsWith("notes.txt"))).toBe(true)
+      },
+    })
+  })
+
+  each("asks for delete permission for mv (move removes the source)", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        const err = new Error("stop after permission")
+        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+        await expect(
+          Effect.runPromise(
+            bash.execute({ command: "mv a.txt b.txt", description: "Rename file" }, capture(requests, err)),
+          ),
+        ).rejects.toThrow(err.message)
+        const deleteReq = requests.find((r) => r.permission === "delete")
+        expect(deleteReq).toBeDefined()
+        expect(deleteReq!.patterns.some((p) => p.endsWith("a.txt"))).toBe(true)
+      },
+    })
+  })
+
+  each("gates delete even when the path is an unresolved glob (rm *)", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        const err = new Error("stop after permission")
+        const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+        await expect(
+          Effect.runPromise(bash.execute({ command: "rm *", description: "Remove all" }, capture(requests, err))),
+        ).rejects.toThrow(err.message)
+        // `rm *` cannot be resolved to a concrete path → falls back to cwd so the
+        // delete is still gated rather than slipping through unguarded.
+        const deleteReq = requests.find((r) => r.permission === "delete")
+        expect(deleteReq).toBeDefined()
+        expect(deleteReq!.patterns.length).toBeGreaterThan(0)
+      },
+    })
+  })
+
   if (process.platform === "win32") {
     if (bash) {
       test(

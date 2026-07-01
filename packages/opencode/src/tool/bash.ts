@@ -48,6 +48,21 @@ const FILES = new Set([
 ])
 const FLAGS = new Set(["-destination", "-literalpath", "-path"])
 const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurse", "-verbose", "-whatif"])
+// Commands that remove a file from its location — including moves/renames,
+// which delete the source path. Gated behind the "delete" permission.
+const DELETE = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "shred",
+  "mv",
+  "remove-item",
+  "ri",
+  "del",
+  "erase",
+  "move-item",
+  "rename-item",
+])
 
 const Parameters = z.object({
   command: z.string().describe("The command to execute"),
@@ -74,6 +89,7 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
+  deletes: Set<string>
 }
 
 export const log = Log.create({ service: "bash-tool" })
@@ -221,6 +237,16 @@ const parse = Effect.fn("BashTool.parse")(function* (command: string, ps: boolea
 })
 
 const ask = Effect.fn("BashTool.ask")(function* (ctx: Tool.Context, scan: Scan) {
+  if (scan.deletes.size > 0) {
+    const deletes = Array.from(scan.deletes)
+    yield* ctx.ask({
+      permission: "delete",
+      patterns: deletes,
+      always: deletes,
+      metadata: {},
+    })
+  }
+
   if (scan.dirs.size > 0) {
     const globs = Array.from(scan.dirs).map((dir) => {
       if (process.platform === "win32") return AppFileSystem.normalizePathPattern(path.join(dir, "*"))
@@ -331,6 +357,7 @@ export const BashTool = Tool.define(
         dirs: new Set<string>(),
         patterns: new Set<string>(),
         always: new Set<string>(),
+        deletes: new Set<string>(),
       }
 
       for (const node of commands(root)) {
@@ -346,6 +373,23 @@ export const BashTool = Tool.define(
             const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
             scan.dirs.add(dir)
           }
+        }
+
+        // File removal (rm/rmdir/unlink/shred and move/rename, which delete the
+        // source) is gated behind the dedicated "delete" permission so it can be
+        // denied independently of edits/bash by the active permission config.
+        // Unlike external_directory, this also covers paths INSIDE the project.
+        if (cmd && DELETE.has(cmd)) {
+          let resolved = false
+          for (const arg of pathArgs(command, ps)) {
+            const target = yield* argPath(arg, cwd, ps, shell)
+            if (!target) continue
+            scan.deletes.add(target)
+            resolved = true
+          }
+          // Globs/dynamic args (e.g. `rm *`) cannot be resolved — fall back to
+          // the working dir so the delete is still gated rather than slipping through.
+          if (!resolved) scan.deletes.add(cwd)
         }
 
         if (tokens.length && (!cmd || !CWD.has(cmd))) {

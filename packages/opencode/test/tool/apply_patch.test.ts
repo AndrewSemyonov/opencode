@@ -120,10 +120,18 @@ describe("tool.apply_patch freeform", () => {
           expect(result.output).not.toContain("\\")
         }
         expect(result.metadata.diff).toContain("Index:")
-        expect(calls.length).toBe(1)
+        // Two asks: "edit" for all changes, plus a separate "delete" ask gating
+        // the deleted file (delete.txt).
+        expect(calls.length).toBe(2)
+
+        const editCall = calls.find((c) => c.permission === "edit")!
+        const deleteCall = calls.find((c) => c.permission === "delete")!
+        expect(editCall).toBeDefined()
+        expect(deleteCall).toBeDefined()
+        expect(deleteCall.patterns.some((p) => p.endsWith("delete.txt"))).toBe(true)
 
         // Verify permission metadata includes files array for UI rendering
-        const permissionCall = calls[0]
+        const permissionCall = editCall
         expect(permissionCall.metadata.files).toHaveLength(3)
         expect(permissionCall.metadata.files.map((f) => f.type).sort()).toEqual(["add", "delete", "update"])
 
@@ -161,8 +169,12 @@ describe("tool.apply_patch freeform", () => {
 
         await execute({ patchText }, ctx)
 
-        expect(calls.length).toBe(1)
-        const permissionCall = calls[0]
+        // edit (new path) + delete (the move removes the source path)
+        expect(calls.length).toBe(2)
+        const permissionCall = calls.find((c) => c.permission === "edit")!
+        const deleteCall = calls.find((c) => c.permission === "delete")!
+        expect(deleteCall).toBeDefined()
+        expect(deleteCall.patterns.some((p) => p.endsWith(path.join("old", "name.txt")))).toBe(true)
         expect(permissionCall.metadata.files).toHaveLength(1)
 
         const moveFile = permissionCall.metadata.files[0]
@@ -171,6 +183,34 @@ describe("tool.apply_patch freeform", () => {
         expect(moveFile.movePath).toBe(path.join(fixture.path, "renamed/dir/name.txt"))
         expect(moveFile.patch).toContain("-old content")
         expect(moveFile.patch).toContain("+new content")
+      },
+    })
+  })
+
+  test("denied delete permission does not remove the file", async () => {
+    await using fixture = await tmpdir({ git: true })
+    const calls: AskInput[] = []
+    const ctx: ToolCtx = {
+      ...baseCtx,
+      ask: (input) =>
+        Effect.sync(() => {
+          calls.push(input)
+          if (input.permission === "delete") throw new Error("delete denied")
+        }),
+    }
+
+    await Instance.provide({
+      directory: fixture.path,
+      fn: async () => {
+        const target = path.join(fixture.path, "keep.txt")
+        await fs.writeFile(target, "important\n", "utf-8")
+
+        const patchText = "*** Begin Patch\n*** Delete File: keep.txt\n*** End Patch"
+
+        await expect(execute({ patchText }, ctx)).rejects.toThrow("delete denied")
+        // The deny must actually prevent removal, not just ask.
+        expect(await fs.readFile(target, "utf-8")).toBe("important\n")
+        expect(calls.some((c) => c.permission === "delete")).toBe(true)
       },
     })
   })

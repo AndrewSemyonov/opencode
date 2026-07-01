@@ -87,6 +87,7 @@ export namespace Agent {
 
           const defaults = Permission.fromConfig({
             "*": "allow",
+            delete: "allow",
             doom_loop: "ask",
             external_directory: {
               "*": "ask",
