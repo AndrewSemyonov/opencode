@@ -404,6 +404,78 @@ const assistantTextContent = (parts: Part[] | undefined): string => {
   return out
 }
 
+const REPORT_FILE_RE = /(?:^|\/)reports\/[^\s/]+\.mdx?$/i
+
+// Path of a report file ACTUALLY written by a completed `write` tool-call in
+// the given parts, or undefined. NOT satisfied by a text mention of a
+// `reports/*.mdx` path: report skills echo their own instructions (which
+// contain the target path) into the conversation, so a text-only match is not
+// proof a report exists; requiring the write tool-call keeps such chats in the
+// normal list. Report skills write the .mdx via the `write` tool; other write
+// mechanisms (bash, python) are picked up by the reports/ directory scan on
+// next mount. Pass only the CURRENT session's parts — a report written in a
+// different session must not count for this one.
+export const findReportArtifactPath = (
+  parts: Record<string, Part[] | undefined> | undefined,
+): string | undefined => {
+  if (!parts) return undefined
+  for (const list of Object.values(parts)) {
+    if (!list) continue
+    for (const part of list) {
+      if (part.type !== "tool" || part.tool !== "write") continue
+      if (part.state.status !== "completed") continue
+      const filePath = part.state.input.filePath
+      if (typeof filePath === "string" && REPORT_FILE_RE.test(filePath)) return filePath
+    }
+  }
+  return undefined
+}
+
+export const hasRealReportArtifact = (parts: Record<string, Part[] | undefined> | undefined): boolean =>
+  !!findReportArtifactPath(parts)
+
+// Pure decision for the report-session self-heal reconcile, split out so every
+// branch is unit-testable without a SolidJS component harness. `plan` decides,
+// from synchronous state, what to do with one candidate session; `resolve`
+// finishes the `checkEmpty` branch once the (async) emptiness probe is known.
+export type ReconcilePlan =
+  | { action: "keep" } // has a report file, or a normal non-report chat → leave it
+  | { action: "skip" } // archived, or has child sessions → never touch
+  | { action: "probeStale" } // mark points at a session absent from the store → confirm gone before dropping the mark
+  | { action: "checkEmpty"; deletable: boolean; marked: boolean } // needs the emptiness probe
+
+export const planReportReconcile = (input: {
+  hasFile: boolean
+  meta: { archived: boolean; created: number } | undefined
+  hasChildren: boolean
+  marked: boolean
+  now: number
+  minAge: number
+}): ReconcilePlan => {
+  if (input.hasFile) return { action: "keep" }
+  if (!input.meta) return { action: "probeStale" }
+  if (input.meta.archived) return { action: "skip" }
+  if (input.hasChildren) return { action: "skip" }
+  return { action: "checkEmpty", deletable: input.now - input.meta.created >= input.minAge, marked: input.marked }
+}
+
+export const resolveReportReconcile = (
+  plan: { deletable: boolean; marked: boolean },
+  state: { empty: boolean; artifact: boolean; ambiguous: boolean },
+): "delete" | "unmark" | "keep" => {
+  // Empty server sessions are abandoned junk (a normal new chat only becomes a
+  // server session on its first message). Delete only ones that were
+  // report-marked and are past the age guard — never an unrelated empty chat.
+  if (state.empty) return plan.deletable && plan.marked ? "delete" : "keep"
+  // Unmark a non-empty marked session ONLY when we are sure it produced no
+  // report: it has no report artifact of its own, it is old enough not to be
+  // mid-generation (deletable = past the age guard), AND there is no
+  // unattributable reports/*.mdx file that could be its own (a report written
+  // via bash with an empty frontmatter sessionId can't be mapped back). Any
+  // uncertainty keeps the mark, so a real report is never re-exposed to CHATS.
+  return plan.marked && !state.artifact && plan.deletable && !state.ambiguous ? "unmark" : "keep"
+}
+
 export const findLatestReportPath = (
   messages: Message[] | undefined,
   parts: Record<string, Part[] | undefined> | undefined,
@@ -539,4 +611,20 @@ export const extractSessionIdFromReport = (path: string, content: string | undef
   }
 
   return undefined
+}
+
+// Attribute a report file to its session by FRONTMATTER ONLY — the authoritative
+// signal. Deliberately does NOT fall back to assistant-text path matching
+// (unreliable: a session that merely echoed the path is not the writer). Both
+// the sidebar reconcile and the in-session self-heal use this, so they agree.
+export const readReportSessionId = async (
+  fileClient: Pick<FileClient, "read">,
+  filePath: string,
+): Promise<string | undefined> => {
+  const data = await fileClient
+    .read({ path: filePath })
+    .then((r) => r.data)
+    .catch(() => undefined)
+  const text = data && data.type === "text" ? data.content : undefined
+  return extractSessionIdFromReport(filePath, text)
 }
