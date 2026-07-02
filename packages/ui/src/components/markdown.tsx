@@ -393,22 +393,46 @@ function markPlainPaths(root: HTMLDivElement) {
 }
 
 // Report references in chat (`reports/<name>.mdx`) render as a button that opens
-// the MDX viewer, not as a raw filename link. The visible date comes from the
-// link text the agent writes (`[<date>](reports/...mdx)`); a bare path shows no
-// date (see reportLinkDate).
+// the MDX viewer, not as a raw filename link. The visible date prefers the
+// link text the agent writes (`[<date>](reports/...mdx)`) when it actually
+// looks like a date; otherwise it falls back to the generation date encoded in
+// the filename (see reportLinkDate).
 export function isReportPath(path: string): boolean {
   // Tolerate the trailing ?start=&end= that previewablePath() appends for
-  // line-anchored links (reports/x.mdx:12).
-  return /^(?:\.\/)?reports\/[^?]+\.mdx(?:\?|$)/i.test(path)
+  // line-anchored links (reports/x.mdx:12), and a nested/absolute prefix
+  // before "reports/" (e.g. /workspace/reports/x.mdx).
+  return /(?:^|\/)reports\/[^?/]+\.mdx(?:\?|$)/i.test(path)
 }
 
-// The button's date comes from the link text the agent writes
-// ([<date>](reports/...mdx)). A bare auto-linked path has previewable text — we
-// show no date then, because the filename carries the generation timestamp,
-// which can differ from the report's data period and would mislead.
-export function reportLinkDate(linkText: string): string {
+const REPORT_LINK_MONTHS = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+]
+
+// A full Russian date, optionally prefixed with "за" and suffixed with "г.".
+const REPORT_LINK_DATE_RE = /^(?:за\s+)?\d{1,2}\s+[а-яё]+\s+\d{4}(?:\s*г\.?)?$/i
+
+// The date extracted from the filename's YYYY-MM-DD generation timestamp,
+// formatted as "D месяца YYYY". Used only when the agent's link text isn't
+// itself a usable date — the generation date can differ from the report's
+// data period, but it beats showing no date at all.
+function reportLinkFilenameDate(href: string): string {
+  const match = href.match(/(\d{4})-(\d{2})-(\d{2})[^/]*\.mdx(?:\?|$)/i)
+  if (!match) return ""
+  const [, year, monthStr, day] = match
+  const month = REPORT_LINK_MONTHS[Number(monthStr) - 1]
+  if (!month) return ""
+  return `${Number(day)} ${month} ${year}`
+}
+
+// The button's date prefers the link text the agent writes
+// ([<date>](reports/...mdx)) when it's actually a date (not a bare path or
+// free text like "отчёт"); otherwise it falls back to the generation date
+// encoded in the filename; otherwise no date at all.
+export function reportLinkDate(linkText: string, href = ""): string {
   const text = linkText.trim()
-  return !text || previewablePath(text) ? "" : text
+  if (text && !previewablePath(text) && REPORT_LINK_DATE_RE.test(text)) return text
+  return reportLinkFilenameDate(href)
 }
 
 export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string) => string) {
@@ -417,14 +441,26 @@ export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string
     const path = previewablePath(anchor.getAttribute("href") ?? "")
     if (!path || !isReportPath(path)) continue
 
+    const date = reportLinkDate(anchor.textContent ?? "", anchor.getAttribute("href") ?? "")
     // Idempotent across re-renders: decorate() always runs on a freshly parsed
     // node, so the original date text is re-read each time, never the prefix.
-    anchor.textContent = reportLabel(reportLinkDate(anchor.textContent ?? ""))
+    anchor.textContent = reportLabel(date)
     anchor.classList.add("report-open-link")
     anchor.classList.remove("external-link")
     anchor.removeAttribute("target")
     anchor.removeAttribute("rel")
     anchor.setAttribute("role", "button")
+
+    // The agent sometimes states the date in prose right before the link too
+    // ("...29 июня 2026 [отчёт](...)"), which would duplicate it now that the
+    // button also shows it. Strip a trailing occurrence (plus punctuation) from
+    // the immediately preceding text node.
+    const prev = anchor.previousSibling
+    if (date && prev instanceof Text && prev.nodeValue) {
+      const escaped = date.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const match = prev.nodeValue.match(new RegExp(`${escaped}[\\s.,:;—-]*$`))
+      if (match?.index !== undefined) prev.nodeValue = prev.nodeValue.slice(0, match.index)
+    }
   }
 }
 
