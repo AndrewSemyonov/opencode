@@ -404,35 +404,21 @@ export function isReportPath(path: string): boolean {
   return /(?:^|\/)reports\/[^?/]+\.mdx(?:\?|$)/i.test(path)
 }
 
-const REPORT_LINK_MONTHS = [
-  "января", "февраля", "марта", "апреля", "мая", "июня",
-  "июля", "августа", "сентября", "октября", "ноября", "декабря",
-]
-
 // A full Russian date, optionally prefixed with "за" and suffixed with "г.".
 const REPORT_LINK_DATE_RE = /^(?:за\s+)?\d{1,2}\s+[а-яё]+\s+\d{4}(?:\s*г\.?)?$/i
+// Same date shape at the END of the prose preceding the link, with trailing
+// punctuation tolerated ("...за 29 июня 2026 [отчёт](...)").
+const REPORT_PROSE_DATE_RE = /(?:за\s+)?\d{1,2}\s+[а-яё]+\s+\d{4}(?:\s*г\.?)?[\s.,:;—-]*$/i
 
-// The date extracted from the filename's YYYY-MM-DD generation timestamp,
-// formatted as "D месяца YYYY". Used only when the agent's link text isn't
-// itself a usable date — the generation date can differ from the report's
-// data period, but it beats showing no date at all.
-function reportLinkFilenameDate(href: string): string {
-  const match = href.match(/(\d{4})-(\d{2})-(\d{2})[^/]*\.mdx(?:\?|$)/i)
-  if (!match) return ""
-  const [, year, monthStr, day] = match
-  const month = REPORT_LINK_MONTHS[Number(monthStr) - 1]
-  if (!month) return ""
-  return `${Number(day)} ${month} ${year}`
-}
-
-// The button's date prefers the link text the agent writes
-// ([<date>](reports/...mdx)) when it's actually a date (not a bare path or
-// free text like "отчёт"); otherwise it falls back to the generation date
-// encoded in the filename; otherwise no date at all.
-export function reportLinkDate(linkText: string, href = ""): string {
+// The button's date is the link text the agent writes ([<date>](reports/...))
+// when it's actually a date — not a bare path or free text like "отчёт".
+// The filename's timestamp is deliberately NOT used as a fallback: it's the
+// generation time, which can differ from the report's data period and would
+// show a wrong date. markReportLinks() additionally adopts a date the agent
+// stated in prose right before the link.
+export function reportLinkDate(linkText: string): string {
   const text = linkText.trim()
-  if (text && !previewablePath(text) && REPORT_LINK_DATE_RE.test(text)) return text
-  return reportLinkFilenameDate(href)
+  return text && !previewablePath(text) && REPORT_LINK_DATE_RE.test(text) ? text : ""
 }
 
 export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string) => string) {
@@ -441,7 +427,21 @@ export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string
     const path = previewablePath(anchor.getAttribute("href") ?? "")
     if (!path || !isReportPath(path)) continue
 
-    const date = reportLinkDate(anchor.textContent ?? "", anchor.getAttribute("href") ?? "")
+    let date = reportLinkDate(anchor.textContent ?? "")
+    // The agent sometimes states the report's date in prose right before the
+    // link instead of inside it ("...за 29 июня 2026 [отчёт](...)"). Adopt it
+    // when the link text itself isn't a date, and strip it from the prose so
+    // the date shows exactly once, on the button. This is the report's own
+    // stated period date — unlike the filename timestamp, which is the
+    // generation time and may differ.
+    const prev = anchor.previousSibling
+    const prose = prev instanceof Text ? (prev.nodeValue ?? "").match(REPORT_PROSE_DATE_RE) : null
+    if (prose && prev instanceof Text) {
+      const stated = prose[0].replace(/[\s.,:;—-]+$/, "")
+      if (!date) date = stated
+      if (stated === date) prev.nodeValue = (prev.nodeValue ?? "").slice(0, prose.index)
+    }
+
     // Idempotent across re-renders: decorate() always runs on a freshly parsed
     // node, so the original date text is re-read each time, never the prefix.
     anchor.textContent = reportLabel(date)
@@ -450,17 +450,6 @@ export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string
     anchor.removeAttribute("target")
     anchor.removeAttribute("rel")
     anchor.setAttribute("role", "button")
-
-    // The agent sometimes states the date in prose right before the link too
-    // ("...29 июня 2026 [отчёт](...)"), which would duplicate it now that the
-    // button also shows it. Strip a trailing occurrence (plus punctuation) from
-    // the immediately preceding text node.
-    const prev = anchor.previousSibling
-    if (date && prev instanceof Text && prev.nodeValue) {
-      const escaped = date.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      const match = prev.nodeValue.match(new RegExp(`${escaped}[\\s.,:;—-]*$`))
-      if (match?.index !== undefined) prev.nodeValue = prev.nodeValue.slice(0, match.index)
-    }
   }
 }
 
