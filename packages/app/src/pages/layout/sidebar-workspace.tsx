@@ -431,7 +431,19 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     // sidebar-local — session.tsx still auto-opens an existing report on generation.
     const { path, open: showPanel } = reportOpenTarget(files, skill.name)
     const openPanel = (sessionId: string) => {
-      if (showPanel) requestOpenFile({ kind: "report", path, sessionId })
+      if (showPanel) {
+        requestOpenFile({ kind: "report", path, sessionId })
+        return
+      }
+      // Users who hit the pre-fix bug still carry a persisted phantom
+      // reports/*.mdx tab for this session (sessionTabs in the layout store),
+      // and the side panel opens from persisted tabs, not only from
+      // requestOpenFile — navigating back would re-open the panel. Drop stale
+      // report tabs when there is no generated file to show.
+      const tabs = layout.tabs(`${slug()}/${sessionId}`)
+      for (const tab of tabs.all()) {
+        if (tab.startsWith("file://") && /(?:^|\/)reports\/[^/]+\.mdx?$/i.test(tab.slice(7))) tabs.close(tab)
+      }
     }
     const target = await resolveReportSessionId(sdk, sync, path)
     if (target) {
