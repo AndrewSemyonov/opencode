@@ -64,6 +64,76 @@ const DELETE = new Set([
   "rename-item",
 ])
 
+// Wrapper commands that execute their trailing argument as a command —
+// `env rm x`, `xargs rm`, `busybox rm x` must be gated like a bare `rm`.
+const WRAPPERS = new Set([
+  "busybox",
+  "command",
+  "doas",
+  "env",
+  "nice",
+  "nohup",
+  "sudo",
+  "time",
+  "timeout",
+  "xargs",
+])
+
+// `git` global options that consume a value before the subcommand
+// (`git -C /tmp rm file`).
+const VALUED = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"])
+
+// The effective executable name: basename (so `/bin/rm` matches `rm`),
+// unwrapping wrapper commands and skipping their leading options and numeric
+// arguments (`timeout 5 rm x`, `nice -n 10 rm x`).
+function executable(tokens: string[], ps: boolean): { name: string | undefined; index: number } {
+  let index = 0
+  while (index < tokens.length) {
+    const raw = tokens[index]
+    if (!raw || raw.startsWith("-") || /^\d+[smhd]?$/.test(raw)) {
+      index += 1
+      continue
+    }
+    const name = path.basename(ps ? raw.toLowerCase() : raw)
+    if (!WRAPPERS.has(name)) return { name, index }
+    index += 1
+  }
+  return { name: undefined, index }
+}
+
+// The first non-option token after `start`, skipping valued global options —
+// finds the git subcommand in `git -C /tmp rm file` without false-positiving
+// on option values like `git commit -m clean`.
+function subcommand(tokens: string[], start: number): string | undefined {
+  for (let index = start; index < tokens.length; index++) {
+    const token = tokens[index]
+    if (VALUED.has(token)) {
+      index += 1
+      continue
+    }
+    if (token.startsWith("-")) continue
+    return token
+  }
+  return undefined
+}
+
+// Whether the command deletes files, beyond the plain DELETE names:
+// `find ... -delete`, `git rm` / `git clean`, and `rsync --delete*` remove
+// paths without ever invoking an rm-like command. Interpreter one-liners
+// (python/node scripts calling unlink) remain out of reach of command-name
+// matching — that residual gap cannot be closed at this layer.
+function removal(name: string | undefined, tokens: string[], index: number): boolean {
+  if (!name) return false
+  if (DELETE.has(name)) return true
+  if (name === "find") return tokens.includes("-delete")
+  if (name === "git") {
+    const sub = subcommand(tokens, index + 1)
+    return sub === "rm" || sub === "clean"
+  }
+  if (name === "rsync") return tokens.some((token) => token.startsWith("--delete"))
+  return false
+}
+
 const Parameters = z.object({
   command: z.string().describe("The command to execute"),
   timeout: z.number().describe("Optional timeout in milliseconds").optional(),
@@ -379,7 +449,11 @@ export const BashTool = Tool.define(
         // source) is gated behind the dedicated "delete" permission so it can be
         // denied independently of edits/bash by the active permission config.
         // Unlike external_directory, this also covers paths INSIDE the project.
-        if (cmd && DELETE.has(cmd)) {
+        // Matching is basename- and wrapper-aware (`/bin/rm`, `env rm`,
+        // `busybox rm`) and covers flag-based deleters (`find -delete`,
+        // `git rm`/`git clean`, `rsync --delete*`), not just literal names.
+        const exec = executable(tokens, ps)
+        if (removal(exec.name, tokens, exec.index)) {
           let resolved = false
           for (const arg of pathArgs(command, ps)) {
             const target = yield* argPath(arg, cwd, ps, shell)

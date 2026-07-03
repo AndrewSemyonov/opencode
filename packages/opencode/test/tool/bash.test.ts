@@ -303,6 +303,53 @@ describe("tool.bash permissions", () => {
     })
   })
 
+  each("gates delete for bypass forms: absolute path, wrapper, find/git/rsync", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        for (const command of [
+          "/bin/rm notes.txt",
+          "env rm notes.txt",
+          "busybox rm notes.txt",
+          "xargs rm",
+          "find . -name '*.txt' -delete",
+          "git rm notes.txt",
+          "git -C . clean -fd",
+          "rsync --delete-after src/ dst/",
+          "timeout 5 rm notes.txt",
+          "nice -n 10 rm notes.txt",
+        ]) {
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          await expect(
+            Effect.runPromise(bash.execute({ command, description: "Bypass attempt" }, capture(requests, err))),
+          ).rejects.toThrow(err.message)
+          const deleteReq = requests.find((r) => r.permission === "delete")
+          expect(deleteReq, `expected a delete request for: ${command}`).toBeDefined()
+        }
+      },
+    })
+  })
+
+  each("does not flag non-deleting look-alikes (git commit -m clean, plain find)", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        for (const command of ["git commit -m clean", "find . -name '*.txt'", "git status"]) {
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          await Effect.runPromise(
+            bash.execute({ command, description: "Innocent command" }, capture(requests, err)),
+          ).catch(() => {})
+          const deleteReq = requests.find((r) => r.permission === "delete")
+          expect(deleteReq, `unexpected delete request for: ${command}`).toBeUndefined()
+        }
+      },
+    })
+  })
+
   each("gates delete even when the path is an unresolved glob (rm *)", async () => {
     await Instance.provide({
       directory: projectRoot,
