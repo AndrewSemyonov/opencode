@@ -48,6 +48,91 @@ const FILES = new Set([
 ])
 const FLAGS = new Set(["-destination", "-literalpath", "-path"])
 const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurse", "-verbose", "-whatif"])
+// Commands that remove a file from its location — including moves/renames,
+// which delete the source path. Gated behind the "delete" permission.
+const DELETE = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "shred",
+  "mv",
+  "remove-item",
+  "ri",
+  "del",
+  "erase",
+  "move-item",
+  "rename-item",
+])
+
+// Wrapper commands that execute their trailing argument as a command —
+// `env rm x`, `xargs rm`, `busybox rm x` must be gated like a bare `rm`.
+const WRAPPERS = new Set([
+  "busybox",
+  "command",
+  "doas",
+  "env",
+  "nice",
+  "nohup",
+  "sudo",
+  "time",
+  "timeout",
+  "xargs",
+])
+
+// `git` global options that consume a value before the subcommand
+// (`git -C /tmp rm file`).
+const VALUED = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"])
+
+// The effective executable name: basename (so `/bin/rm` matches `rm`),
+// unwrapping wrapper commands and skipping their leading options and numeric
+// arguments (`timeout 5 rm x`, `nice -n 10 rm x`).
+function executable(tokens: string[], ps: boolean): { name: string | undefined; index: number } {
+  let index = 0
+  while (index < tokens.length) {
+    const raw = tokens[index]
+    if (!raw || raw.startsWith("-") || /^\d+[smhd]?$/.test(raw)) {
+      index += 1
+      continue
+    }
+    const name = path.basename(ps ? raw.toLowerCase() : raw)
+    if (!WRAPPERS.has(name)) return { name, index }
+    index += 1
+  }
+  return { name: undefined, index }
+}
+
+// The first non-option token after `start`, skipping valued global options —
+// finds the git subcommand in `git -C /tmp rm file` without false-positiving
+// on option values like `git commit -m clean`.
+function subcommand(tokens: string[], start: number): string | undefined {
+  for (let index = start; index < tokens.length; index++) {
+    const token = tokens[index]
+    if (VALUED.has(token)) {
+      index += 1
+      continue
+    }
+    if (token.startsWith("-")) continue
+    return token
+  }
+  return undefined
+}
+
+// Whether the command deletes files, beyond the plain DELETE names:
+// `find ... -delete`, `git rm` / `git clean`, and `rsync --delete*` remove
+// paths without ever invoking an rm-like command. Interpreter one-liners
+// (python/node scripts calling unlink) remain out of reach of command-name
+// matching — that residual gap cannot be closed at this layer.
+function removal(name: string | undefined, tokens: string[], index: number): boolean {
+  if (!name) return false
+  if (DELETE.has(name)) return true
+  if (name === "find") return tokens.includes("-delete")
+  if (name === "git") {
+    const sub = subcommand(tokens, index + 1)
+    return sub === "rm" || sub === "clean"
+  }
+  if (name === "rsync") return tokens.some((token) => token.startsWith("--delete"))
+  return false
+}
 
 const Parameters = z.object({
   command: z.string().describe("The command to execute"),
@@ -74,6 +159,7 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
+  deletes: Set<string>
 }
 
 export const log = Log.create({ service: "bash-tool" })
@@ -221,6 +307,16 @@ const parse = Effect.fn("BashTool.parse")(function* (command: string, ps: boolea
 })
 
 const ask = Effect.fn("BashTool.ask")(function* (ctx: Tool.Context, scan: Scan) {
+  if (scan.deletes.size > 0) {
+    const deletes = Array.from(scan.deletes)
+    yield* ctx.ask({
+      permission: "delete",
+      patterns: deletes,
+      always: deletes,
+      metadata: {},
+    })
+  }
+
   if (scan.dirs.size > 0) {
     const globs = Array.from(scan.dirs).map((dir) => {
       if (process.platform === "win32") return AppFileSystem.normalizePathPattern(path.join(dir, "*"))
@@ -331,6 +427,7 @@ export const BashTool = Tool.define(
         dirs: new Set<string>(),
         patterns: new Set<string>(),
         always: new Set<string>(),
+        deletes: new Set<string>(),
       }
 
       for (const node of commands(root)) {
@@ -346,6 +443,27 @@ export const BashTool = Tool.define(
             const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
             scan.dirs.add(dir)
           }
+        }
+
+        // File removal (rm/rmdir/unlink/shred and move/rename, which delete the
+        // source) is gated behind the dedicated "delete" permission so it can be
+        // denied independently of edits/bash by the active permission config.
+        // Unlike external_directory, this also covers paths INSIDE the project.
+        // Matching is basename- and wrapper-aware (`/bin/rm`, `env rm`,
+        // `busybox rm`) and covers flag-based deleters (`find -delete`,
+        // `git rm`/`git clean`, `rsync --delete*`), not just literal names.
+        const exec = executable(tokens, ps)
+        if (removal(exec.name, tokens, exec.index)) {
+          let resolved = false
+          for (const arg of pathArgs(command, ps)) {
+            const target = yield* argPath(arg, cwd, ps, shell)
+            if (!target) continue
+            scan.deletes.add(target)
+            resolved = true
+          }
+          // Globs/dynamic args (e.g. `rm *`) cannot be resolved — fall back to
+          // the working dir so the delete is still gated rather than slipping through.
+          if (!resolved) scan.deletes.add(cwd)
         }
 
         if (tokens.length && (!cmd || !CWD.has(cmd))) {
