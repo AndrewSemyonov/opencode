@@ -60,6 +60,19 @@ export const findLatestReportFileForSkill = (
   return matches.at(-1)
 }
 
+// Decides what clicking a report skill should do. The viewer panel opens only
+// when a generated report file actually exists; for a not-yet-generated skill
+// `open` is false and the sidebar just navigates into the session (the single
+// "Generate" CTA lives in the composer). `path` is the existing file, or the
+// expected path used to resolve the originating session when none exists.
+export const reportOpenTarget = (
+  files: FileListEntry[] | null | undefined,
+  skillName: string,
+): { path: string; open: boolean } => {
+  const existing = findLatestReportFileForSkill(files, skillName)
+  return { path: existing ?? expectedReportPath(skillName), open: existing !== undefined }
+}
+
 export const isReportSkill = (cmd: {
   name: string
   title?: string | null

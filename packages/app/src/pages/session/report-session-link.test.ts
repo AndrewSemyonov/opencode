@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import type { Command, Message, Part } from "@opencode-ai/sdk/v2/client"
 import {
   checkReportGenerated,
+  expectedReportPath,
   extractReportPathFromText,
   extractSessionIdFromReport,
   findLatestReportPath,
@@ -12,6 +13,7 @@ import {
   isReportSkill,
   loadWorkspaceReportSkills,
   mergeReportSkills,
+  reportOpenTarget,
   reportSkillAliases,
   reportSkillChoices,
   reportSkillCommands,
@@ -607,5 +609,43 @@ describe("findReportSkillForFile", () => {
     expect(findReportSkillForFile([], "reports/x.mdx")).toBeUndefined()
     expect(findReportSkillForFile(undefined, "reports/x.mdx")).toBeUndefined()
     expect(findReportSkillForFile(null, "reports/x.mdx")).toBeUndefined()
+  })
+})
+
+// reportOpenTarget is the gate for opening the report side panel from the
+// sidebar. open:true means a generated report exists and the panel opens;
+// open:false means not generated yet, so the sidebar must NOT open a phantom
+// panel (this is the invariant that fixes the "two Generate buttons" bug).
+describe("reportOpenTarget", () => {
+  const skill = "breakfast-cost-per-guest-vs-7d"
+  const entry = (name: string, type = "file") => ({ type, name, path: `reports/${name}` })
+  const closed = { path: expectedReportPath(skill), open: false }
+
+  it("does not open the panel when no report exists", () => {
+    expect(reportOpenTarget([], skill)).toEqual(closed)
+    expect(reportOpenTarget(undefined, skill)).toEqual(closed)
+    expect(reportOpenTarget(null, skill)).toEqual(closed)
+    expect(reportOpenTarget([entry("guests-yesterday-vs-plan.mdx")], skill)).toEqual(closed)
+  })
+
+  it("does not open the panel for a directory whose name matches", () => {
+    expect(reportOpenTarget([entry(`${skill}-2026.mdx`, "directory")], skill)).toEqual(closed)
+  })
+
+  it("opens the existing report (.md or .mdx), even alongside unrelated files", () => {
+    expect(reportOpenTarget([entry(`${skill}.mdx`)], skill)).toEqual({ path: `reports/${skill}.mdx`, open: true })
+    expect(reportOpenTarget([entry(`${skill}-2026-06-22.md`)], skill)).toEqual({
+      path: `reports/${skill}-2026-06-22.md`,
+      open: true,
+    })
+    expect(reportOpenTarget([entry("notes.txt"), entry(`${skill}.mdx`)], skill)).toEqual({
+      path: `reports/${skill}.mdx`,
+      open: true,
+    })
+  })
+
+  it("opens the lexicographically last matching file", () => {
+    const files = [entry(`${skill}-2026-06-10-09:00.mdx`), entry(`${skill}-2026-06-22-11:54.mdx`)]
+    expect(reportOpenTarget(files, skill)).toEqual({ path: `reports/${skill}-2026-06-22-11:54.mdx`, open: true })
   })
 })
