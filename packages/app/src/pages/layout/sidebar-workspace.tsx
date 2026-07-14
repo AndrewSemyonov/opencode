@@ -26,18 +26,21 @@ import { SyncProvider, useSync } from "@/context/sync"
 import { requestOpenFile } from "@/pages/session/pending-file-open"
 import {
   extractSessionIdFromReport,
+  findReportArtifactPath,
   findReportSkillForFile,
   findSessionIdByReportPath,
-  hasRealReportArtifact,
   loadWorkspaceReportSkills,
   mergeReportSkills,
-  planReportReconcile,
   readReportSessionId,
   reportOpenTarget,
   reportSkillCommands,
-  resolveReportReconcile,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
+import {
+  runReportSessionBackfill,
+  type CurrentReportArtifact,
+  type FetchReportSessionResult,
+} from "@/pages/session/report-session-reconcile"
 
 type InlineEditorComponent = (props: {
   id: string
@@ -320,10 +323,10 @@ function isSessionGone(error: unknown): boolean {
 async function reportState(
   sdk: ReturnType<typeof useSDK>,
   sessionID: string,
-): Promise<{ empty: boolean; artifact: boolean; busy: boolean }> {
+): Promise<{ empty: boolean; artifactPath?: string; busy: boolean }> {
   const res = await sdk.client.session.messages({ sessionID, limit: 1000 }).catch(() => undefined)
   const items = (res?.data ?? []).filter((x) => !!x?.info?.id)
-  if (!res) return { empty: false, artifact: true, busy: true }
+  if (!res) return { empty: false, busy: true }
   const parts: Record<string, Part[]> = {}
   for (const item of items) parts[item.info.id] = item.parts ?? []
   // Mid-generation guard: a run is "busy" while its assistant turn is streaming
@@ -338,8 +341,27 @@ async function reportState(
   // no such part, but those are matched authoritatively by the reports/ dir
   // scan (withFile) BEFORE this fallback runs. A bare text link is NOT used: it
   // can be present with no real file (a claimed-but-not-written report).
-  const artifact = hasRealReportArtifact(parts)
-  return { empty: items.length === 0, artifact, busy }
+  return { empty: items.length === 0, artifactPath: findReportArtifactPath(parts), busy }
+}
+
+const reportPath = (path: string): string | undefined =>
+  path.replaceAll("\\", "/").match(/(?:^|\/)(reports\/[^/]+\.mdx?)$/i)?.[1]
+
+async function currentReportArtifact(
+  sdk: ReturnType<typeof useSDK>,
+  sessionID: string,
+  path: string,
+): Promise<CurrentReportArtifact> {
+  const normalized = reportPath(path)
+  if (!normalized) return "stale"
+  const files = await sdk.client.file
+    .list({ path: "reports" })
+    .then((result) => result.data)
+    .catch(() => undefined)
+  if (!files) return "unknown"
+  if (!files.some((file) => file.type !== "directory" && file.path === normalized)) return "stale"
+  const owner = await readReportSessionId(sdk.client.file, normalized)
+  return owner && owner !== sessionID ? "stale" : "current"
 }
 
 // Report-session membership is re-derived from the workspace's committed
@@ -378,7 +400,6 @@ function createReportSessionBackfill(input: {
   directory: string
   skills: Accessor<ReportSkillCommand[]>
   sdk: ReturnType<typeof useSDK>
-  sync: ReturnType<typeof useSync>
   globalSync: ReturnType<typeof useGlobalSync>
   layout: ReturnType<typeof useLayout>
 }): void {
@@ -399,100 +420,38 @@ function createReportSessionBackfill(input: {
       }
       if (current !== token) return // a newer pass started, or we unmounted
 
-      // 1) Every session backed by a report file is a real report → mark it.
-      // `ambiguous` = a real reports/*.mdx exists that could NOT be mapped to a
-      // session (empty/unresolvable frontmatter sessionId — the skills allow
-      // this when the session-id tool is unavailable). Such a file might belong
-      // to any marked session, so its presence blocks the reconcile from
-      // dropping marks (a bash report must not be re-exposed to CHATS).
-      const withFile = new Set<string>()
-      let ambiguous = false
-      await Promise.all(
-        (files ?? []).map(async (file) => {
-          if (!file.path || file.type === "directory") return
-          if (!/\.mdx?$/i.test(file.path)) return
-          // Frontmatter ONLY (same authoritative signal as the in-session
-          // self-heal) — never text-mention matching, which would pin a file to
-          // a session that merely echoed the path and demote the real writer.
-          const sid = await readReportSessionId(input.sdk.client.file, file.path)
-          if (current !== token) return
-          if (!sid) {
-            ambiguous = true
-            return
+      if (!reconciled) await input.globalSync.project.loadSessions(input.directory).catch(() => {})
+      if (current !== token) return
+
+      const completed = await runReportSessionBackfill({
+        files,
+        skills: list,
+        sessions: input.globalSync.child(input.directory, { bootstrap: false })[0].session ?? [],
+        marked: input.layout.reportSessions.reportSessionIds(input.directory),
+        now: Date.now(),
+        minAge: RECONCILE_MIN_AGE,
+        reconcile: !reconciled,
+        isCurrent: () => current === token,
+        readReportOwner: (path) => readReportSessionId(input.sdk.client.file, path),
+        mark: (sid, skill) => input.layout.reportSessions.markReportSession(input.directory, sid, skill),
+        unmark: (sid) => input.layout.reportSessions.unmarkReportSession(input.directory, sid),
+        fetchSession: async (sid): Promise<FetchReportSessionResult> => {
+          try {
+            const response = await input.sdk.client.session.get({ sessionID: sid })
+            return response.data ? { status: "found", session: response.data } : { status: "unknown" }
+          } catch (error) {
+            return isSessionGone(error) ? { status: "gone" } : { status: "unknown" }
           }
-          withFile.add(sid)
-          const skill = findReportSkillForFile(list, file.path)
-          if (skill) input.layout.reportSessions.markReportSession(input.directory, sid, skill.name)
-        }),
-      )
-      if (current !== token) return
-
-      // 2) Reconcile once per mount (set the flag only AFTER a full pass, so a
-      // pass superseded mid-await doesn't permanently consume the one-shot).
-      if (reconciled) return
-      await input.globalSync.project.loadSessions(input.directory).catch(() => {})
-      if (current !== token) return
-
-      const sessions = input.globalSync.child(input.directory, { bootstrap: false })[0].session ?? []
-      const roots = new Map(sessions.filter((s) => !s.parentID).map((s) => [s.id, s]))
-      // Best-effort: the child store holds only roots at mount, so this is
-      // usually empty. The real safety net against cascading deletes is the
-      // emptiness probe below (a parent with children always has messages).
-      const parents = new Set(sessions.filter((s) => s.parentID).map((s) => s.parentID))
-      const marked = input.layout.reportSessions.reportSessionIds(input.directory)
-      const now = Date.now()
-      const unmark = (sid: string) => input.layout.reportSessions.unmarkReportSession(input.directory, sid)
-      for (const sid of new Set([...marked, ...roots.keys()])) {
-        const meta = roots.get(sid) ?? input.sync.session.get(sid)
-        const plan = planReportReconcile({
-          hasFile: withFile.has(sid),
-          meta: meta ? { archived: !!meta.time?.archived, created: meta.time?.created ?? 0 } : undefined,
-          hasChildren: parents.has(sid),
-          marked: marked.has(sid),
-          now,
-          minAge: RECONCILE_MIN_AGE,
-        })
-        if (plan.action === "keep" || plan.action === "skip") continue
-        if (plan.action === "probeStale") {
-          // Absent from the (trimmed/paged) client store — drop the mark ONLY on
-          // a definitive "gone" from the server (a transient/thrown error keeps
-          // it), so a real report paged out of the store is never re-exposed.
-          const gone = await input.sdk.client.session
-            .get({ sessionID: sid })
-            .then(() => false)
-            .catch(isSessionGone)
-          if (current !== token) return
-          if (gone) unmark(sid)
-          continue
-        }
-        // resolveReportReconcile always keeps a non-marked session regardless
-        // of its emptiness — skip the wasted probe for it entirely (delete only
-        // ever targets a report-marked orphan).
-        if (!plan.marked) continue
-        // A marked session that no report file resolved to is only unmarked
-        // when it has no report artifact of its OWN — fetch its messages
-        // (emptiness + artifact + busy).
-        const state = await reportState(input.sdk, sid)
-        if (current !== token) return
-        // A report still generating (busy) has no file yet — leave it in
-        // REPORTS, don't reveal it mid-run.
-        if (state.busy) continue
-        const outcome = resolveReportReconcile(plan, { ...state, ambiguous })
-        if (outcome === "delete") {
-          const deleted = await input.sdk.client.session
+        },
+        readState: (sid) => reportState(input.sdk, sid),
+        checkArtifact: (sid, path) => currentReportArtifact(input.sdk, sid, path),
+        deleteSession: (sid) =>
+          input.sdk.client.session
             .delete({ sessionID: sid })
             .then(() => true)
-            .catch(() => false)
-          // Only drop the mark once the session is actually gone — an unmark
-          // after a failed delete would turn hidden report-junk into a visible
-          // empty "New session" that no later pass can clean up (delete only
-          // targets marked sessions).
-          if (deleted) unmark(sid)
-        } else if (outcome === "unmark") {
-          unmark(sid)
-        }
-      }
-      if (current === token) reconciled = true
+            .catch(() => false),
+      })
+      if (completed && current === token) reconciled = true
     })()
   })
 }
@@ -513,7 +472,7 @@ const WorkspaceReportSessionsSyncBody = (props: { directory: string }): JSX.Elem
   const skills = createMemo<ReportSkillCommand[]>(() =>
     mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
   )
-  createReportSessionBackfill({ directory: props.directory, skills, sdk, sync, globalSync, layout })
+  createReportSessionBackfill({ directory: props.directory, skills, sdk, globalSync, layout })
   return null
 }
 

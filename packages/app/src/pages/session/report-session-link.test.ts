@@ -24,6 +24,7 @@ import {
   resolveReportReconcile,
   strictReportSkillChoice,
 } from "./report-session-link"
+import { runReportSessionBackfill } from "./report-session-reconcile"
 
 describe("extractSessionIdFromReport", () => {
   it("reads sessionId from md frontmatter", () => {
@@ -759,26 +760,83 @@ describe("resolveReportReconcile", () => {
     expect(resolveReportReconcile({ deletable: true, marked: false }, { empty: false, artifact: false, ambiguous: false })).toBe("keep")
   })
 
-  it("does not skip stale-mark reconciliation when the workspace has zero report skills", async () => {
-    // The coordinator lives in the sidebar component, which cannot be imported
-    // into Bun's server-side test runtime because its UI dependencies require
-    // the browser build of Solid. Guard the exact wiring regression here, then
-    // assert the resulting stale non-report chat is planned for unmarking.
-    const source = await Bun.file(new URL("../layout/sidebar-workspace.tsx", import.meta.url)).text()
-    const start = source.indexOf("function createReportSessionBackfill")
-    const end = source.indexOf("const WorkspaceReportSessionsSyncBody", start)
-    const coordinator = source.slice(start, end)
+})
 
-    expect(start).toBeGreaterThanOrEqual(0)
-    expect(end).toBeGreaterThan(start)
-    expect(coordinator).toContain("const list = input.skills()")
-    expect(coordinator).not.toContain("if (list.length === 0) return")
-    expect(
-      resolveReportReconcile(
-        { deletable: true, marked: true },
-        { empty: false, artifact: false, ambiguous: false },
-      ),
-    ).toBe("unmark")
+describe("runReportSessionBackfill", () => {
+  type Input = Parameters<typeof runReportSessionBackfill>[0]
+
+  const setup = (overrides: Partial<Input> = {}) => {
+    const unmarked: string[] = []
+    const marked: Array<[string, string]> = []
+    const input: Input = {
+      files: [],
+      skills: [],
+      sessions: [{ id: "ses_old", time: { created: 0 } }],
+      marked: new Set(["ses_old"]),
+      now: 120_000,
+      minAge: 60_000,
+      reconcile: true,
+      isCurrent: () => true,
+      readReportOwner: async () => undefined,
+      mark: (sessionID, skillName) => marked.push([sessionID, skillName]),
+      unmark: (sessionID) => unmarked.push(sessionID),
+      fetchSession: async () => ({ status: "unknown" }),
+      readState: async () => ({ empty: false, busy: false }),
+      checkArtifact: async () => "stale",
+      deleteSession: async () => true,
+      ...overrides,
+    }
+    return { input, unmarked, marked }
+  }
+
+  it("actually unmarks a stale chat when the workspace has zero report skills", async () => {
+    const test = setup({ skills: [] })
+    expect(await runReportSessionBackfill(test.input)).toBe(true)
+    expect(test.unmarked).toEqual(["ses_old"])
+  })
+
+  it("continues reconciliation after finding a paged-out session on the server", async () => {
+    const test = setup({
+      sessions: [],
+      fetchSession: async () => ({ status: "found", session: { id: "ses_old", time: { created: 0 } } }),
+    })
+    await runReportSessionBackfill(test.input)
+    expect(test.unmarked).toEqual(["ses_old"])
+  })
+
+  it("drops a mark when a paged-out session is definitively gone, but not on an uncertain lookup", async () => {
+    const gone = setup({ sessions: [], fetchSession: async () => ({ status: "gone" }) })
+    await runReportSessionBackfill(gone.input)
+    expect(gone.unmarked).toEqual(["ses_old"])
+
+    const uncertain = setup({ sessions: [], fetchSession: async () => ({ status: "unknown" }) })
+    await runReportSessionBackfill(uncertain.input)
+    expect(uncertain.unmarked).toEqual([])
+  })
+
+  it("does not let a historical write hide a chat after its report file disappeared or changed owner", async () => {
+    const stale = setup({
+      readState: async () => ({ empty: false, busy: false, artifactPath: "reports/old.mdx" }),
+      checkArtifact: async () => "stale",
+    })
+    await runReportSessionBackfill(stale.input)
+    expect(stale.unmarked).toEqual(["ses_old"])
+  })
+
+  it("keeps the mark when the write artifact is current or cannot be checked safely", async () => {
+    const current = setup({
+      readState: async () => ({ empty: false, busy: false, artifactPath: "reports/current.mdx" }),
+      checkArtifact: async () => "current",
+    })
+    await runReportSessionBackfill(current.input)
+    expect(current.unmarked).toEqual([])
+
+    const uncertain = setup({
+      readState: async () => ({ empty: false, busy: false, artifactPath: "reports/current.mdx" }),
+      checkArtifact: async () => "unknown",
+    })
+    await runReportSessionBackfill(uncertain.input)
+    expect(uncertain.unmarked).toEqual([])
   })
 })
 
