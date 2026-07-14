@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { attachmentMime } from "./files"
 import { pasteMode } from "./paste"
+import { ACCEPTED_FILE_TYPES, XLSX_MIME } from "@/constants/file-picker"
 
 describe("attachmentMime", () => {
   test("keeps PDFs when the browser reports the mime", async () => {
@@ -21,6 +22,17 @@ describe("attachmentMime", () => {
   test("rejects binary files", async () => {
     const file = new File([Uint8Array.of(0, 255, 1, 2)], "blob.bin", { type: "application/octet-stream" })
     expect(await attachmentMime(file)).toBeUndefined()
+  })
+
+  test("accepts XLSX files by browser mime", async () => {
+    const file = new File([Uint8Array.of(80, 75, 3, 4)], "report.xlsx", { type: XLSX_MIME })
+    expect(await attachmentMime(file)).toBe(XLSX_MIME)
+    expect(ACCEPTED_FILE_TYPES).toContain(XLSX_MIME)
+  })
+
+  test("accepts XLSX files by extension when the browser reports another mime", async () => {
+    const file = new File([Uint8Array.of(80, 75, 3, 4)], "report.XLSX", { type: "application/zip" })
+    expect(await attachmentMime(file)).toBe(XLSX_MIME)
   })
 })
 

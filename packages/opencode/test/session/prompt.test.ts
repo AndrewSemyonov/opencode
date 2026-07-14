@@ -10,6 +10,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
+import { Spreadsheet } from "../../src/session/spreadsheet"
 
 Log.init({ print: false })
 
@@ -195,6 +196,54 @@ describe("session.prompt missing file", () => {
             expect(text[0]?.startsWith("Called the Read tool with the following input:")).toBe(true)
             expect(text[1]?.includes("Read tool failed to read")).toBe(true)
             expect(text[2]).toBe("after-file")
+
+            yield* sessions.remove(session.id)
+          }),
+        ),
+    })
+  })
+})
+
+describe("session.prompt spreadsheet", () => {
+  test("extracts all XLSX sheets into synthetic text", async () => {
+    const data = (await Bun.file(path.join(import.meta.dir, "../fixture/spreadsheet.xlsx.base64")).text()).replaceAll(
+      /\s/g,
+      "",
+    )
+
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: () =>
+        run(
+          Effect.gen(function* () {
+            const prompt = yield* SessionPrompt.Service
+            const sessions = yield* Session.Service
+            const session = yield* sessions.create({})
+
+            const msg = yield* prompt.prompt({
+              sessionID: session.id,
+              agent: "build",
+              noReply: true,
+              parts: [
+                { type: "text", text: "read the spreadsheet" },
+                {
+                  type: "file",
+                  mime: Spreadsheet.MIME,
+                  url: `data:${Spreadsheet.MIME};base64,${data}`,
+                  filename: "hotel.xlsx",
+                },
+              ],
+            })
+
+            if (msg.info.role !== "user") throw new Error("expected user message")
+            const text = msg.parts.filter((part) => part.type === "text").map((part) => part.text)
+            expect(text).toContainEqual(expect.stringContaining("Called the Read tool"))
+            expect(text).toContainEqual(expect.stringContaining("## Sheet: Hotels"))
+            expect(text).toContainEqual(expect.stringContaining("Olympic\t2026-07-13T00:00:00.000Z\t73\t18250"))
+            expect(text).toContainEqual(expect.stringContaining("Total\t\t115\t29170"))
+            expect(text).toContainEqual(expect.stringContaining("## Sheet: Control"))
+            expect(text).toContainEqual(expect.stringContaining("XLSX_E2E_CONTROL\t86420"))
 
             yield* sessions.remove(session.id)
           }),

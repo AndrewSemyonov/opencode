@@ -235,11 +235,18 @@ describe("session.message-v2.toModelMessage", () => {
           },
           {
             ...basePart(messageID, "p6"),
+            type: "file",
+            mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename: "report.xlsx",
+            url: "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,UEsDBA==",
+          },
+          {
+            ...basePart(messageID, "p7"),
             type: "compaction",
             auto: true,
           },
           {
-            ...basePart(messageID, "p7"),
+            ...basePart(messageID, "p8"),
             type: "subtask",
             prompt: "prompt",
             description: "desc",

@@ -49,6 +49,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { EffectBridge } from "@/effect/bridge"
+import { Spreadsheet } from "./spreadsheet"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1039,6 +1040,40 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       type: "text",
                       synthetic: true,
                       text: decodeDataUrl(part.url),
+                    },
+                    { ...part, messageID: info.id, sessionID: input.sessionID },
+                  ]
+                }
+                if (Spreadsheet.supports(part.mime)) {
+                  const parsed = yield* Effect.exit(Effect.tryPromise(() => Spreadsheet.text(part.url, part.filename)))
+                  if (Exit.isFailure(parsed)) {
+                    const error = Cause.squash(parsed.cause)
+                    const message = error instanceof Error ? error.message : String(error)
+                    return [
+                      {
+                        messageID: info.id,
+                        sessionID: input.sessionID,
+                        type: "text",
+                        synthetic: true,
+                        text: `Failed to read spreadsheet ${part.filename ?? "file.xlsx"}: ${message}`,
+                      },
+                      { ...part, messageID: info.id, sessionID: input.sessionID },
+                    ]
+                  }
+                  return [
+                    {
+                      messageID: info.id,
+                      sessionID: input.sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text: `Called the Read tool with the following input: ${JSON.stringify({ filePath: part.filename })}`,
+                    },
+                    {
+                      messageID: info.id,
+                      sessionID: input.sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text: parsed.value,
                     },
                     { ...part, messageID: info.id, sessionID: input.sessionID },
                   ]
