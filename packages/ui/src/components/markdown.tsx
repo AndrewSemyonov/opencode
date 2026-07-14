@@ -393,22 +393,32 @@ function markPlainPaths(root: HTMLDivElement) {
 }
 
 // Report references in chat (`reports/<name>.mdx`) render as a button that opens
-// the MDX viewer, not as a raw filename link. The visible date comes from the
-// link text the agent writes (`[<date>](reports/...mdx)`); a bare path shows no
-// date (see reportLinkDate).
+// the MDX viewer, not as a raw filename link. The visible date prefers the
+// link text the agent writes (`[<date>](reports/...mdx)`) when it actually
+// looks like a date; otherwise it falls back to the generation date encoded in
+// the filename (see reportLinkDate).
 export function isReportPath(path: string): boolean {
   // Tolerate the trailing ?start=&end= that previewablePath() appends for
-  // line-anchored links (reports/x.mdx:12).
-  return /^(?:\.\/)?reports\/[^?]+\.mdx(?:\?|$)/i.test(path)
+  // line-anchored links (reports/x.mdx:12), and a nested/absolute prefix
+  // before "reports/" (e.g. /workspace/reports/x.mdx).
+  return /(?:^|\/)reports\/[^?/]+\.mdx(?:\?|$)/i.test(path)
 }
 
-// The button's date comes from the link text the agent writes
-// ([<date>](reports/...mdx)). A bare auto-linked path has previewable text — we
-// show no date then, because the filename carries the generation timestamp,
-// which can differ from the report's data period and would mislead.
+// A full Russian date, optionally prefixed with "за" and suffixed with "г.".
+const REPORT_LINK_DATE_RE = /^(?:за\s+)?\d{1,2}\s+[а-яё]+\s+\d{4}(?:\s*г\.?)?$/i
+// Same date shape at the END of the prose preceding the link, with trailing
+// punctuation tolerated ("...за 29 июня 2026 [отчёт](...)").
+const REPORT_PROSE_DATE_RE = /(?:за\s+)?\d{1,2}\s+[а-яё]+\s+\d{4}(?:\s*г\.?)?[\s.,:;—-]*$/i
+
+// The button's date is the link text the agent writes ([<date>](reports/...))
+// when it's actually a date — not a bare path or free text like "отчёт".
+// The filename's timestamp is deliberately NOT used as a fallback: it's the
+// generation time, which can differ from the report's data period and would
+// show a wrong date. markReportLinks() additionally adopts a date the agent
+// stated in prose right before the link.
 export function reportLinkDate(linkText: string): string {
   const text = linkText.trim()
-  return !text || previewablePath(text) ? "" : text
+  return text && !previewablePath(text) && REPORT_LINK_DATE_RE.test(text) ? text : ""
 }
 
 export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string) => string) {
@@ -417,9 +427,24 @@ export function markReportLinks(root: HTMLDivElement, reportLabel: (date: string
     const path = previewablePath(anchor.getAttribute("href") ?? "")
     if (!path || !isReportPath(path)) continue
 
+    let date = reportLinkDate(anchor.textContent ?? "")
+    // The agent sometimes states the report's date in prose right before the
+    // link instead of inside it ("...за 29 июня 2026 [отчёт](...)"). Adopt it
+    // when the link text itself isn't a date, and strip it from the prose so
+    // the date shows exactly once, on the button. This is the report's own
+    // stated period date — unlike the filename timestamp, which is the
+    // generation time and may differ.
+    const prev = anchor.previousSibling
+    const prose = prev instanceof Text ? (prev.nodeValue ?? "").match(REPORT_PROSE_DATE_RE) : null
+    if (prose && prev instanceof Text) {
+      const stated = prose[0].replace(/[\s.,:;—-]+$/, "")
+      if (!date) date = stated
+      if (stated === date) prev.nodeValue = (prev.nodeValue ?? "").slice(0, prose.index)
+    }
+
     // Idempotent across re-renders: decorate() always runs on a freshly parsed
     // node, so the original date text is re-read each time, never the prefix.
-    anchor.textContent = reportLabel(reportLinkDate(anchor.textContent ?? ""))
+    anchor.textContent = reportLabel(date)
     anchor.classList.add("report-open-link")
     anchor.classList.remove("external-link")
     anchor.removeAttribute("target")
