@@ -49,13 +49,16 @@ import {
   expectedReportPath,
   findLatestReportPath,
   findLatestReportSkill,
+  findReportArtifactPath,
   findReportSkillForFile,
+  readReportSessionId,
   loadWorkspaceReportSkills,
   mergeReportSkills,
   reportSkillChoices,
   reportSkillCommands,
   reportSkillSignaturesFromSkills,
   strictReportSkillChoice,
+  type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
 import { ReportGenerateButton } from "@/pages/session/composer/report-generate-button"
 import { consumePendingFileOpen, peekPendingFileOpen, requestOpenFile } from "@/pages/session/pending-file-open"
@@ -336,6 +339,32 @@ function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
   }
 }
 
+// Authoritative check for "did this session produce a report file": lists the
+// reports/ dir and matches a file whose frontmatter sessionId is this session.
+// Tool-agnostic (write/bash/python) and immune to bare text mentions of a path.
+// `checked` is false only when the dir couldn't be listed. `ambiguous` is true
+// when a reports/*.mdx exists that couldn't be attributed to any session (empty
+// frontmatter sessionId — the skills allow this) — it might be this session's,
+// so the caller must not treat "no match" as "no report".
+async function findSessionReportFile(
+  sdk: ReturnType<typeof useSDK>,
+  sessionID: string,
+): Promise<{ checked: boolean; path?: string; ambiguous: boolean }> {
+  const files = await sdk.client.file
+    .list({ path: "reports" })
+    .then((r) => r.data ?? [])
+    .catch(() => null)
+  if (files === null) return { checked: false, ambiguous: false }
+  let ambiguous = false
+  for (const file of files) {
+    if (!file.path || !/\.mdx?$/i.test(file.path)) continue
+    const sid = await readReportSessionId(sdk.client.file, file.path)
+    if (sid === sessionID) return { checked: true, path: file.path, ambiguous: false }
+    if (!sid) ambiguous = true
+  }
+  return { checked: true, ambiguous }
+}
+
 export default function Page() {
   const globalSync = useGlobalSync()
   const layout = useLayout()
@@ -349,7 +378,7 @@ export default function Page() {
   const prompt = usePrompt()
   const comments = useComments()
   const terminal = useTerminal()
-  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string; report?: string }>()
   const navigate = useNavigate()
   const { params, sessionKey, tabs, view } = useSessionLayout()
 
@@ -538,48 +567,97 @@ export default function Page() {
     mergeReportSkills(reportSkillCommands(sync.data.command), workspaceReportSkills() ?? []),
   )
   const reportSignature = createMemo(() => reportSkillSignaturesFromSkills(reportSkills()))
-  const reportInvoked = createMemo(() => layout.reportSessions.isReportSession(sdk.directory, params.id))
+  // `?report=<skill>` opens the report view for a session that does NOT exist
+  // yet: clicking a report in the sidebar no longer creates an empty session —
+  // it just routes here, and the real session is created only when the user
+  // presses Generate (see generateReport).
+  const reportParam = createMemo(() => searchParams.report || undefined)
+  const reportInvoked = createMemo(
+    () => !!reportParam() || layout.reportSessions.isReportSession(sdk.directory, params.id),
+  )
   const latestReportPath = createMemo(() => {
     const id = params.id
     if (!id) return undefined
     return findLatestReportPath(sync.data.message[id], sync.data.part, reportSignature())
   })
+  // Path of the report file actually written by a completed `write` tool-call
+  // in THIS session (undefined otherwise). A session counts as a report ONLY
+  // when such a file exists — a bare `reports/foo.mdx` mention in assistant
+  // text (e.g. the skill echoing its own instructions) is not enough, so chats
+  // that merely trigger a report skill without producing a file stay in the
+  // normal chat list. Scoped to the current session's parts: a report written
+  // in a different session must not mark this one (the directory-wide part
+  // store keeps other sessions' write parts resident).
+  const reportArtifactPath = createMemo(() => {
+    const id = params.id
+    if (!id) return undefined
+    const scoped = Object.fromEntries(
+      (sync.data.message[id] ?? []).map((m) => [m.id, sync.data.part[m.id]]),
+    )
+    return findReportArtifactPath(scoped)
+  })
   const inferredReportSkill = createMemo(() => {
     const id = params.id
     if (!id) return undefined
+    const filePath = latestReportPath() ?? reportArtifactPath()
     return (
       findLatestReportSkill(reportSkills(), sync.data.message[id], sync.data.part) ??
-      (latestReportPath() ? findReportSkillForFile(reportSkills(), latestReportPath()!) : undefined)
+      (filePath ? findReportSkillForFile(reportSkills(), filePath) : undefined)
     )
   })
   const selectedReportSkillName = createMemo(
-    () => layout.reportSessions.reportSkillForSession(sdk.directory, params.id) ?? inferredReportSkill()?.name,
+    () =>
+      reportParam() ??
+      layout.reportSessions.reportSkillForSession(sdk.directory, params.id) ??
+      inferredReportSkill()?.name,
   )
   const reportSkillOptions = createMemo(() => {
-    if (reportInvoked()) return strictReportSkillChoice(reportSkills(), selectedReportSkillName())
+    if (reportInvoked()) {
+      const strict = strictReportSkillChoice(reportSkills(), selectedReportSkillName())
+      if (strict.length > 0) return strict
+      // The skill list may not have streamed in yet for a fresh report view. If
+      // we already know the target skill name (from ?report=<skill> or the
+      // session's mark), still offer it by name so the Generate button is not
+      // stuck disabled while commands load. generateReport only needs the name.
+      const name = selectedReportSkillName()
+      // Minimal stub — the Generate button only reads `name`/`title`.
+      return name ? [{ name } as ReportSkillCommand] : []
+    }
     return reportSkillChoices(reportSkills(), selectedReportSkillName())
   })
-  // Derive hasReport from latestReportPath so the two memos can't disagree.
-  // latestReportPath already gates on reportSignature (skill aliases match a
-  // prior user message), which is what we want for "this session has a real
-  // report" — bare assistant mentions of `reports/foo.mdx` no longer
-  // false-positive into the UI.
-  const hasReport = createMemo(() => reportInvoked() && !!latestReportPath())
+  // For the composer/header: an EXISTING report session (has an id) lets you
+  // keep chatting / regenerate (promptInput + "Regenerate"); the id-less
+  // `?report=` view (no session yet) shows the "Generate" button. Whether a
+  // report FILE actually exists is decided authoritatively elsewhere (the
+  // reports/ dir scan) — it must not gate the composer, or a report written via
+  // bash (no write-tool part, link not always echoed) would wrongly lock the
+  // input behind a Generate button.
+  const hasReport = createMemo(() => reportInvoked() && !!params.id)
   createEffect(
     on(
-      [latestReportPath, () => params.id, inferredReportSkill],
-      ([path, id, skill], prev) => {
-        const prevPath = prev?.[0]
-        if (!path || !id) {
+      [latestReportPath, () => params.id, inferredReportSkill, reportArtifactPath],
+      ([textPath, id, skill, artifactPath], prev) => {
+        // Prefer the path the assistant linked in text; fall back to the
+        // written file when it didn't echo the link.
+        const openPath = textPath ?? artifactPath
+        if (!id || !openPath) {
           const pending = peekPendingFileOpen()
           if (pending?.kind === "report" && pending.sessionId && pending.sessionId !== id) {
             consumePendingFileOpen()
           }
           return
         }
-        if (skill) layout.reportSessions.markReportSession(sdk.directory, id, skill.name)
-        if (path === prevPath) return
-        requestOpenFile({ kind: "report", path, sessionId: id })
+        // A session is a report (hidden from CHATS) ONLY when a report file was
+        // really written in it — a text-only path mention must never hide a
+        // chat that produced no file. Marking is gated on the write artifact.
+        // Auto-opening the panel is more permissive (openPath above, which also
+        // accepts a text link): it covers reports written via bash/python (no
+        // write-tool part), and a wrong/stale link just shows the existing
+        // "not generated" fallback panel — harmless, unlike marking.
+        if (artifactPath && skill) layout.reportSessions.markReportSession(sdk.directory, id, skill.name)
+        const prevOpen = prev ? (prev[0] ?? prev[3]) : undefined
+        if (openPath === prevOpen) return
+        requestOpenFile({ kind: "report", path: openPath, sessionId: id })
       },
     ),
   )
@@ -598,34 +676,38 @@ export default function Page() {
         return
       }
 
-      let sessionID = params.id
       const sessionDirectory = sdk.directory
-      const fresh = !sessionID || userMessages().length === 0
-      if (!fresh || !sessionID) {
-        const created = await sdk.client.session
-          .create()
-          .then((x) => x.data ?? undefined)
-          .catch((err) => {
-            fail(err)
-            return undefined
-          })
-        if (!created) return
-        const [, setStore] = globalSync.child(sessionDirectory)
-        setStore("session", (list) => {
-          const result = Binary.search(list, created.id, (item) => item.id)
-          const next = [...list]
-          if (result.found) next[result.index] = created
-          else next.splice(result.index, 0, created)
-          return next
+      // Always generate into a FRESH session — never reuse an existing empty
+      // one. A brand-new session is younger than RECONCILE_MIN_AGE, so the mount
+      // reconcile can't delete it in the window between marking it and sending
+      // the /skill prompt. (Regenerating an existing report already spawns a new
+      // session, so this only changes the rare empty-session reuse case.)
+      const created = await sdk.client.session
+        .create()
+        .then((x) => x.data ?? undefined)
+        .catch((err) => {
+          fail(err)
+          return undefined
         })
-        local.session.promote(sessionDirectory, created.id)
-        layout.reportSessions.markReportSession(sessionDirectory, created.id, skillName)
-        layout.handoff.setTabs(base64Encode(sessionDirectory), created.id)
-        sessionID = created.id
-        navigate(`/${base64Encode(sessionDirectory)}/session/${created.id}`)
-      } else {
-        layout.reportSessions.markReportSession(sessionDirectory, sessionID, skillName)
-      }
+      if (!created) return
+      const [, setStore] = globalSync.child(sessionDirectory)
+      setStore("session", (list) => {
+        const result = Binary.search(list, created.id, (item) => item.id)
+        const next = [...list]
+        if (result.found) next[result.index] = created
+        else next.splice(result.index, 0, created)
+        return next
+      })
+      local.session.promote(sessionDirectory, created.id)
+      layout.handoff.setTabs(base64Encode(sessionDirectory), created.id)
+      const sessionID = created.id
+      navigate(`/${base64Encode(sessionDirectory)}/session/${created.id}`)
+      // Mark as a report immediately so the session sits under REPORTS (hidden
+      // from CHATS) WHILE it generates — it never flashes into the chat list
+      // mid-run. If the run finishes WITHOUT writing a reports/*.mdx file it is
+      // unmarked back into CHATS (the working→idle effect, and the mount
+      // reconcile); a run that writes a file keeps its mark and stays in REPORTS.
+      layout.reportSessions.markReportSession(sessionDirectory, sessionID, skillName)
 
       // Set a deterministic title (the skill's own title) before sending the
       // prompt. The server's title summarizer only fires when the session
@@ -1248,6 +1330,49 @@ export default function Page() {
         if (!wantsReview()) return
         if (next !== "idle" || prev === undefined || prev === "idle") return
         void loadVcs(mode, true)
+      },
+      { defer: true },
+    ),
+  )
+
+  // A report run that finishes (busy→idle) WITHOUT actually writing a
+  // reports/*.mdx file is unmarked, so it drops from REPORTS back into CHATS. A
+  // run that wrote a file stays in REPORTS. The session stays marked for the
+  // whole run (it never appears in the chat list mid-generation), and the check
+  // is authoritative — it lists the reports/ dir and matches the file's
+  // frontmatter sessionId, so it works no matter which tool (write/bash/python)
+  // wrote the file, and a bare text mention of a path never counts.
+  //
+  // The source is [id, status] (not just status): navigating from a busy
+  // session A to an idle session B would otherwise still recompute the plain
+  // status signal, so `on` would report a "transition" made of A's previous
+  // status and B's new status — a false busy→idle for a session that never
+  // actually finished a run. Requiring prevId === id restricts the check to a
+  // genuine transition within the SAME session.
+  const reportFileConfirmed = new Set<string>() // sessions already known to have a report file — skip the re-scan
+  createEffect(
+    on(
+      () => [params.id, params.id ? (sync.data.session_status[params.id]?.type ?? "idle") : "idle"] as const,
+      ([id, next], prev) => {
+        const [prevId, prevStatus] = prev ?? [undefined, undefined]
+        if (!id || id !== prevId) return
+        if (next !== "idle" || prevStatus === undefined || prevStatus === "idle") return
+        if (!layout.reportSessions.isReportSession(sdk.directory, id)) return
+        if (reportFileConfirmed.has(id)) return // already has a file — nothing to drop
+        if (reportArtifactPath()) return // fast path: a completed write-tool file
+        void findSessionReportFile(sdk, id).then((res) => {
+          if (params.id !== id) return
+          if (res.path) {
+            reportFileConfirmed.add(id)
+            return
+          }
+          // Keep in REPORTS unless we're SURE there's no report: couldn't list
+          // the dir, or an unattributable file exists that could be its (bash
+          // report, empty frontmatter sessionId).
+          if (!res.checked || res.ambiguous) return
+          if (!layout.reportSessions.isReportSession(sdk.directory, id)) return
+          layout.reportSessions.unmarkReportSession(sdk.directory, id)
+        })
       },
       { defer: true },
     ),

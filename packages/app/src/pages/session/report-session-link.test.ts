@@ -7,18 +7,24 @@ import {
   extractSessionIdFromReport,
   findLatestReportPath,
   findLatestReportSkill,
+  findReportArtifactPath,
   findReportSkillForFile,
   findSessionIdByReportPath,
+  hasRealReportArtifact,
   hasReportInvocation,
   isReportSkill,
   loadWorkspaceReportSkills,
   mergeReportSkills,
+  planReportReconcile,
+  readReportSessionId,
   reportOpenTarget,
   reportSkillAliases,
   reportSkillChoices,
   reportSkillCommands,
+  resolveReportReconcile,
   strictReportSkillChoice,
 } from "./report-session-link"
+import { runReportSessionBackfill } from "./report-session-reconcile"
 
 describe("extractSessionIdFromReport", () => {
   it("reads sessionId from md frontmatter", () => {
@@ -609,6 +615,228 @@ describe("findReportSkillForFile", () => {
     expect(findReportSkillForFile([], "reports/x.mdx")).toBeUndefined()
     expect(findReportSkillForFile(undefined, "reports/x.mdx")).toBeUndefined()
     expect(findReportSkillForFile(null, "reports/x.mdx")).toBeUndefined()
+  })
+})
+
+describe("hasRealReportArtifact", () => {
+  const writePart = (filePath: string, status = "completed"): Part =>
+    ({
+      id: "t1",
+      sessionID: "s",
+      messageID: "a1",
+      type: "tool",
+      callID: "c1",
+      tool: "write",
+      state: { status, input: { filePath, content: "x" } },
+    }) as unknown as Part
+
+  it("is false for missing / empty parts", () => {
+    expect(hasRealReportArtifact(undefined)).toBe(false)
+    expect(hasRealReportArtifact({})).toBe(false)
+  })
+
+  // The core of the fix: a chat that only *mentions* a reports/ path in text
+  // (e.g. the skill echoing its own instructions) is NOT a report session, so
+  // it must stay in the normal chat list.
+  it("is false when text only mentions a report path (no write tool-call)", () => {
+    const parts = { a1: [textPart("p1", "a1", "создай файл reports/guests-yesterday.mdx с отчётом")] }
+    expect(hasRealReportArtifact(parts)).toBe(false)
+  })
+
+  it("is true when a completed write actually wrote a reports/*.mdx file", () => {
+    expect(hasRealReportArtifact({ a1: [writePart("reports/guests-yesterday.mdx")] })).toBe(true)
+  })
+
+  it("accepts .md and absolute reports/ paths", () => {
+    expect(hasRealReportArtifact({ a1: [writePart("reports/weekly.md")] })).toBe(true)
+    expect(hasRealReportArtifact({ a1: [writePart("/workspace/reports/weekly.mdx")] })).toBe(true)
+  })
+
+  it("is false for a completed write to a non-report path", () => {
+    expect(hasRealReportArtifact({ a1: [writePart("src/index.ts")] })).toBe(false)
+  })
+
+  it("is false while the report write is still running or errored (not completed)", () => {
+    expect(hasRealReportArtifact({ a1: [writePart("reports/weekly.mdx", "running")] })).toBe(false)
+    expect(hasRealReportArtifact({ a1: [writePart("reports/weekly.mdx", "error")] })).toBe(false)
+    expect(hasRealReportArtifact({ a1: [writePart("reports/weekly.mdx", "pending")] })).toBe(false)
+  })
+
+  it("finds the write across multiple messages and part kinds", () => {
+    const parts = {
+      u1: [textPart("p0", "u1", "/report")],
+      a1: [textPart("p1", "a1", "готовлю отчёт"), writePart("reports/report-2026-07-01.mdx")],
+    }
+    expect(hasRealReportArtifact(parts)).toBe(true)
+  })
+
+  it("findReportArtifactPath returns the written path (or undefined)", () => {
+    expect(findReportArtifactPath({ a1: [writePart("reports/guests-yesterday.mdx")] })).toBe(
+      "reports/guests-yesterday.mdx",
+    )
+    expect(findReportArtifactPath({ a1: [writePart("src/index.ts")] })).toBeUndefined()
+    expect(findReportArtifactPath({ a1: [textPart("p1", "a1", "reports/x.mdx")] })).toBeUndefined()
+    expect(findReportArtifactPath(undefined)).toBeUndefined()
+  })
+})
+
+describe("planReportReconcile", () => {
+  const base = { hasFile: false, hasChildren: false, marked: false, now: 1_000_000, minAge: 60_000 }
+  const meta = (created: number, archived = false) => ({ archived, created })
+
+  it("keeps a session that has a report file", () => {
+    expect(planReportReconcile({ ...base, hasFile: true, meta: meta(0) }).action).toBe("keep")
+  })
+
+  it("probes the server when the session is absent from the store", () => {
+    expect(planReportReconcile({ ...base, meta: undefined }).action).toBe("probeStale")
+  })
+
+  it("skips archived sessions and sessions with children", () => {
+    expect(planReportReconcile({ ...base, meta: meta(0, true) }).action).toBe("skip")
+    expect(planReportReconcile({ ...base, meta: meta(0), hasChildren: true }).action).toBe("skip")
+  })
+
+  it("marks an old empty candidate deletable, a young one not", () => {
+    const old = planReportReconcile({ ...base, meta: meta(0), now: 1_000_000 })
+    expect(old).toEqual({ action: "checkEmpty", deletable: true, marked: false })
+    const young = planReportReconcile({ ...base, meta: meta(1_000_000 - 5_000), now: 1_000_000 })
+    expect(young).toEqual({ action: "checkEmpty", deletable: false, marked: false })
+  })
+
+  it("carries the marked flag through to the empty check", () => {
+    expect(planReportReconcile({ ...base, meta: meta(0), marked: true })).toEqual({
+      action: "checkEmpty",
+      deletable: true,
+      marked: true,
+    })
+  })
+})
+
+describe("readReportSessionId", () => {
+  const client = (content: string | undefined) => ({
+    read: async () => ({ data: content === undefined ? undefined : { type: "text", content } }),
+  })
+
+  it("returns the frontmatter sessionId", async () => {
+    expect(await readReportSessionId(client("---\nsessionId: ses_x9\n---\n# Report"), "reports/r.mdx")).toBe("ses_x9")
+  })
+
+  it("returns undefined for empty/missing frontmatter — NO assistant-text fallback", async () => {
+    expect(await readReportSessionId(client("---\ntitle: no session id here\n---\nbody"), "reports/r.mdx")).toBeUndefined()
+    // a body that merely MENTIONS a reports path must not attribute the file
+    expect(await readReportSessionId(client("# body mentioning reports/other.mdx"), "reports/r.mdx")).toBeUndefined()
+  })
+
+  it("returns undefined when the file can't be read", async () => {
+    const bad = {
+      read: async () => {
+        throw new Error("nope")
+      },
+    }
+    expect(await readReportSessionId(bad, "reports/r.mdx")).toBeUndefined()
+  })
+})
+
+describe("resolveReportReconcile", () => {
+  it("deletes only a report-marked empty session past the age guard", () => {
+    expect(resolveReportReconcile({ deletable: true, marked: true }, { empty: true, artifact: false, ambiguous: false })).toBe("delete")
+    // not marked → keep (never delete an unrelated empty chat)
+    expect(resolveReportReconcile({ deletable: true, marked: false }, { empty: true, artifact: false, ambiguous: false })).toBe("keep")
+    // young (just created) → keep
+    expect(resolveReportReconcile({ deletable: false, marked: true }, { empty: true, artifact: false, ambiguous: false })).toBe("keep")
+  })
+
+  it("unmarks a non-empty marked chat only when it is surely not a report", () => {
+    // marked, non-empty, no artifact, old, no ambiguous file → stale mark → reveal
+    expect(resolveReportReconcile({ deletable: true, marked: true }, { empty: false, artifact: false, ambiguous: false })).toBe("unmark")
+    // HAS write artifact → real report → keep
+    expect(resolveReportReconcile({ deletable: true, marked: true }, { empty: false, artifact: true, ambiguous: false })).toBe("keep")
+    // an unattributable reports/ file exists (bash, empty frontmatter) → keep
+    expect(resolveReportReconcile({ deletable: true, marked: true }, { empty: false, artifact: false, ambiguous: true })).toBe("keep")
+    // young (possibly mid-generation) → keep
+    expect(resolveReportReconcile({ deletable: false, marked: true }, { empty: false, artifact: false, ambiguous: false })).toBe("keep")
+    // not marked → keep
+    expect(resolveReportReconcile({ deletable: true, marked: false }, { empty: false, artifact: false, ambiguous: false })).toBe("keep")
+  })
+
+})
+
+describe("runReportSessionBackfill", () => {
+  type Input = Parameters<typeof runReportSessionBackfill>[0]
+
+  const setup = (overrides: Partial<Input> = {}) => {
+    const unmarked: string[] = []
+    const marked: Array<[string, string]> = []
+    const input: Input = {
+      files: [],
+      skills: [],
+      sessions: [{ id: "ses_old", time: { created: 0 } }],
+      marked: new Set(["ses_old"]),
+      now: 120_000,
+      minAge: 60_000,
+      reconcile: true,
+      isCurrent: () => true,
+      readReportOwner: async () => undefined,
+      mark: (sessionID, skillName) => marked.push([sessionID, skillName]),
+      unmark: (sessionID) => unmarked.push(sessionID),
+      fetchSession: async () => ({ status: "unknown" }),
+      readState: async () => ({ empty: false, busy: false }),
+      checkArtifact: async () => "stale",
+      deleteSession: async () => true,
+      ...overrides,
+    }
+    return { input, unmarked, marked }
+  }
+
+  it("actually unmarks a stale chat when the workspace has zero report skills", async () => {
+    const test = setup({ skills: [] })
+    expect(await runReportSessionBackfill(test.input)).toBe(true)
+    expect(test.unmarked).toEqual(["ses_old"])
+  })
+
+  it("continues reconciliation after finding a paged-out session on the server", async () => {
+    const test = setup({
+      sessions: [],
+      fetchSession: async () => ({ status: "found", session: { id: "ses_old", time: { created: 0 } } }),
+    })
+    await runReportSessionBackfill(test.input)
+    expect(test.unmarked).toEqual(["ses_old"])
+  })
+
+  it("drops a mark when a paged-out session is definitively gone, but not on an uncertain lookup", async () => {
+    const gone = setup({ sessions: [], fetchSession: async () => ({ status: "gone" }) })
+    await runReportSessionBackfill(gone.input)
+    expect(gone.unmarked).toEqual(["ses_old"])
+
+    const uncertain = setup({ sessions: [], fetchSession: async () => ({ status: "unknown" }) })
+    await runReportSessionBackfill(uncertain.input)
+    expect(uncertain.unmarked).toEqual([])
+  })
+
+  it("does not let a historical write hide a chat after its report file disappeared or changed owner", async () => {
+    const stale = setup({
+      readState: async () => ({ empty: false, busy: false, artifactPath: "reports/old.mdx" }),
+      checkArtifact: async () => "stale",
+    })
+    await runReportSessionBackfill(stale.input)
+    expect(stale.unmarked).toEqual(["ses_old"])
+  })
+
+  it("keeps the mark when the write artifact is current or cannot be checked safely", async () => {
+    const current = setup({
+      readState: async () => ({ empty: false, busy: false, artifactPath: "reports/current.mdx" }),
+      checkArtifact: async () => "current",
+    })
+    await runReportSessionBackfill(current.input)
+    expect(current.unmarked).toEqual([])
+
+    const uncertain = setup({
+      readState: async () => ({ empty: false, busy: false, artifactPath: "reports/current.mdx" }),
+      checkArtifact: async () => "unknown",
+    })
+    await runReportSessionBackfill(uncertain.input)
+    expect(uncertain.unmarked).toEqual([])
   })
 })
 

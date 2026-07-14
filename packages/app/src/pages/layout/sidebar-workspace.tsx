@@ -5,7 +5,6 @@ import { createSortable } from "@thisbeyond/solid-dnd"
 import { createMediaQuery } from "@solid-primitives/media"
 import { base64Encode } from "@opencode-ai/shared/util/encode"
 import { getFilename } from "@opencode-ai/shared/util/path"
-import { Binary } from "@opencode-ai/shared/util/binary"
 import { Button } from "@opencode-ai/ui/button"
 import { Collapsible } from "@opencode-ai/ui/collapsible"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
@@ -13,7 +12,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { type Session } from "@opencode-ai/sdk/v2/client"
+import { type Part, type Session } from "@opencode-ai/sdk/v2/client"
 import { type LocalProject, useLayout } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
@@ -27,14 +26,21 @@ import { SyncProvider, useSync } from "@/context/sync"
 import { requestOpenFile } from "@/pages/session/pending-file-open"
 import {
   extractSessionIdFromReport,
+  findReportArtifactPath,
   findReportSkillForFile,
   findSessionIdByReportPath,
   loadWorkspaceReportSkills,
   mergeReportSkills,
+  readReportSessionId,
   reportOpenTarget,
   reportSkillCommands,
   type ReportSkillCommand,
 } from "@/pages/session/report-session-link"
+import {
+  runReportSessionBackfill,
+  type CurrentReportArtifact,
+  type FetchReportSessionResult,
+} from "@/pages/session/report-session-reconcile"
 
 type InlineEditorComponent = (props: {
   id: string
@@ -295,38 +301,115 @@ async function resolveReportSessionId(
   return undefined
 }
 
+// Empty sessions younger than this are never deleted by the reconcile, so a
+// session that was just created (and may still be receiving its first message)
+// can't be mistaken for old left-over junk.
+const RECONCILE_MIN_AGE = 60_000
+
+// True only when the server confirms a session is genuinely gone (a 404
+// NotFoundError). The SDK is built with throwOnError, so a transient network
+// failure rejects the exact same way as a 404 — inspecting the error shape
+// (NamedError.toObject() -> { name, data }) is the only way to tell them
+// apart. Treating every rejection as "gone" would wrongly drop a real report's
+// mark on a flaky connection, re-exposing it in CHATS.
+function isSessionGone(error: unknown): boolean {
+  return !!error && typeof error === "object" && (error as { name?: unknown }).name === "NotFoundError"
+}
+
+// Authoritative report state of a session, from its own messages: whether it
+// has 0 messages, whether it actually wrote a reports/*.mdx file, and whether a
+// turn is still in flight (a report mid-generation). All fall back to the safe
+// side on error (non-empty + has-artifact + busy → never delete, never unmark).
+async function reportState(
+  sdk: ReturnType<typeof useSDK>,
+  sessionID: string,
+): Promise<{ empty: boolean; artifactPath?: string; busy: boolean }> {
+  const res = await sdk.client.session.messages({ sessionID, limit: 1000 }).catch(() => undefined)
+  const items = (res?.data ?? []).filter((x) => !!x?.info?.id)
+  if (!res) return { empty: false, busy: true }
+  const parts: Record<string, Part[]> = {}
+  for (const item of items) parts[item.info.id] = item.parts ?? []
+  // Mid-generation guard: a run is "busy" while its assistant turn is streaming
+  // (an assistant message with no `completed`), AND during the brief window
+  // right after `/skill` is sent where the user message exists but the assistant
+  // row hasn't been committed yet (a non-empty session with NO assistant
+  // message). Either way we must not unmark it.
+  const busy =
+    items.some((x) => x.info.role === "assistant" && x.info.time.completed == null) ||
+    (items.length > 0 && !items.some((x) => x.info.role === "assistant"))
+  // Only the write-tool part counts here — a report written via bash/python has
+  // no such part, but those are matched authoritatively by the reports/ dir
+  // scan (withFile) BEFORE this fallback runs. A bare text link is NOT used: it
+  // can be present with no real file (a claimed-but-not-written report).
+  return { empty: items.length === 0, artifactPath: findReportArtifactPath(parts), busy }
+}
+
+const reportPath = (path: string): string | undefined =>
+  path.replaceAll("\\", "/").match(/(?:^|\/)(reports\/[^/]+\.mdx?)$/i)?.[1]
+
+async function currentReportArtifact(
+  sdk: ReturnType<typeof useSDK>,
+  sessionID: string,
+  path: string,
+): Promise<CurrentReportArtifact> {
+  const normalized = reportPath(path)
+  if (!normalized) return "stale"
+  const files = await sdk.client.file
+    .list({ path: "reports" })
+    .then((result) => result.data)
+    .catch(() => undefined)
+  if (!files) return "unknown"
+  if (!files.some((file) => file.type !== "directory" && file.path === normalized)) return "stale"
+  const owner = await readReportSessionId(sdk.client.file, normalized)
+  return owner && owner !== sessionID ? "stale" : "current"
+}
+
 // Report-session membership is re-derived from the workspace's committed
 // `reports/` directory while the workspace is mounted. That directory is
-// git-tracked and survives sandbox recreation, so no separate cache file is
-// needed — a previous `.opencode-data/report-sessions.json` cache never
-// persisted anyway (opspace excludes `.opencode-data/` from git/auto-commit).
+// git-tracked and survives sandbox recreation, so it is the source of truth for
+// "this session produced a report" — no separate cache file is needed (a
+// previous `.opencode-data/report-sessions.json` cache never persisted anyway,
+// opspace excludes `.opencode-data/` from git/auto-commit).
 //
-// Scans `reports/`, maps each report file to its origin session, and marks
-// those sessions so the sidebar hides them from the normal chat list. Re-runs
-// whenever the report-skill list changes (e.g. as commands stream in).
+// Invariant enforced here: a session is hidden from the chat list ⟺ it has a
+// real report file in `reports/`. Each pass:
+//   1. marks every session that HAS a report file (keeps it hidden), and
+//   2. once (after the session list is loaded) reconciles everything else:
+//        • an empty (0-message) root session → deleted, and
+//        • a real chat wrongly tagged as a report but with NO file → unmarked
+//          so it returns to the normal chat list.
 //
-// Each run bumps `token`; stale runs (superseded by a newer skill list, or by
-// the component unmounting) drop their results via the token check — so we
-// never need an "in flight" guard that could miss a later skill update.
+// An empty server session is abandoned junk: a normal new chat only becomes a
+// server session on its first message, so nothing the user cares about is ever
+// message-less. Empty root sessions that were REPORT-MARKED (left-over "New
+// session" chats from the old click-a-report-creates-a-session bug) are deleted;
+// an unrelated empty chat is left alone. Archived sessions, sessions that have
+// child sessions, and sessions younger than RECONCILE_MIN_AGE are untouched.
 //
-// Marks are only ADDED, never removed: a report session is often marked before
-// its file exists (just generated, still running, or not yet committed), so
-// unmarking sessions that lack a current `reports/` file would wrongly re-expose
-// those pending report sessions in the chat list.
+// The marking pass re-runs whenever the report-skill list changes (commands
+// stream in at startup). The destructive reconcile runs once PER MOUNT (guarded
+// by `reconciled`), after explicitly loading the session list. Note the
+// workspace subtree unmounts/remounts on collapse/expand, so it can run again
+// later — deleting a session the user just started is prevented not by timing
+// but by the emptiness probe plus the RECONCILE_MIN_AGE age guard (a
+// mid-generation report already carries its `/skill` message, so it is never
+// empty; a brand-new session is younger than the age guard). Each run bumps
+// `token`; stale runs (superseded, or the component unmounting) drop their work
+// via the token check.
 function createReportSessionBackfill(input: {
   directory: string
   skills: Accessor<ReportSkillCommand[]>
   sdk: ReturnType<typeof useSDK>
-  sync: ReturnType<typeof useSync>
+  globalSync: ReturnType<typeof useGlobalSync>
   layout: ReturnType<typeof useLayout>
 }): void {
   let token = 0
+  let reconciled = false
   onCleanup(() => {
     token++ // any in-flight pass becomes a no-op
   })
   createEffect(() => {
     const list = input.skills()
-    if (list.length === 0) return
     const current = ++token // supersede any in-flight pass
     void (async () => {
       let files: Awaited<ReturnType<typeof input.sdk.client.file.list>>["data"]
@@ -336,16 +419,39 @@ function createReportSessionBackfill(input: {
         return
       }
       if (current !== token) return // a newer pass started, or we unmounted
-      await Promise.all(
-        (files ?? []).map(async (file) => {
-          if (!file.path || file.type === "directory") return
-          const skill = findReportSkillForFile(list, file.path)
-          if (!skill) return
-          const sid = await resolveReportSessionId(input.sdk, input.sync, file.path)
-          if (current !== token) return
-          if (sid) input.layout.reportSessions.markReportSession(input.directory, sid, skill.name)
-        }),
-      )
+
+      if (!reconciled) await input.globalSync.project.loadSessions(input.directory).catch(() => {})
+      if (current !== token) return
+
+      const completed = await runReportSessionBackfill({
+        files,
+        skills: list,
+        sessions: input.globalSync.child(input.directory, { bootstrap: false })[0].session ?? [],
+        marked: input.layout.reportSessions.reportSessionIds(input.directory),
+        now: Date.now(),
+        minAge: RECONCILE_MIN_AGE,
+        reconcile: !reconciled,
+        isCurrent: () => current === token,
+        readReportOwner: (path) => readReportSessionId(input.sdk.client.file, path),
+        mark: (sid, skill) => input.layout.reportSessions.markReportSession(input.directory, sid, skill),
+        unmark: (sid) => input.layout.reportSessions.unmarkReportSession(input.directory, sid),
+        fetchSession: async (sid): Promise<FetchReportSessionResult> => {
+          try {
+            const response = await input.sdk.client.session.get({ sessionID: sid })
+            return response.data ? { status: "found", session: response.data } : { status: "unknown" }
+          } catch (error) {
+            return isSessionGone(error) ? { status: "gone" } : { status: "unknown" }
+          }
+        },
+        readState: (sid) => reportState(input.sdk, sid),
+        checkArtifact: (sid, path) => currentReportArtifact(input.sdk, sid, path),
+        deleteSession: (sid) =>
+          input.sdk.client.session
+            .delete({ sessionID: sid })
+            .then(() => true)
+            .catch(() => false),
+      })
+      if (completed && current === token) reconciled = true
     })()
   })
 }
@@ -357,6 +463,7 @@ function createReportSessionBackfill(input: {
 const WorkspaceReportSessionsSyncBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
   const sync = useSync()
+  const globalSync = useGlobalSync()
   const layout = useLayout()
   const [workspaceSkills] = createResource(
     () => props.directory,
@@ -365,7 +472,7 @@ const WorkspaceReportSessionsSyncBody = (props: { directory: string }): JSX.Elem
   const skills = createMemo<ReportSkillCommand[]>(() =>
     mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
   )
-  createReportSessionBackfill({ directory: props.directory, skills, sdk, sync, layout })
+  createReportSessionBackfill({ directory: props.directory, skills, sdk, globalSync, layout })
   return null
 }
 
@@ -383,7 +490,6 @@ const WorkspaceReportSessionsSync = (props: { directory: string }): JSX.Element 
 const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element => {
   const sdk = useSDK()
   const sync = useSync()
-  const globalSync = useGlobalSync()
   const layout = useLayout()
   const navigate = useNavigate()
   const language = useLanguage()
@@ -393,26 +499,17 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
     mergeReportSkills(reportSkillCommands(sync.data.command), workspaceSkills() ?? []),
   )
 
-  const createReportSession = async (skillName: string): Promise<string | undefined> => {
-    const created = await sdk.client.session
-      .create()
-      .then((x) => x.data ?? undefined)
-      .catch(() => undefined)
-    if (!created) return undefined
-    const [, setStore] = globalSync.child(props.directory)
-    setStore("session", (list) => {
-      const result = Binary.search(list, created.id, (item) => item.id)
-      const next = [...list]
-      if (result.found) next[result.index] = created
-      else next.splice(result.index, 0, created)
-      return next
-    })
-    layout.reportSessions.markReportSession(props.directory, created.id, skillName)
-    layout.handoff.setTabs(base64Encode(props.directory), created.id)
-    return created.id
-  }
-
-  const existingPendingSession = (skillName: string): string | undefined => {
+  // Clicking a report in the sidebar must NOT create a session. If a report
+  // file already exists we open its origin session (and the file panel); if it
+  // doesn't, we route to the id-less session view with `?report=<skill>`, which
+  // shows the Generate button. A real session is created only when the user
+  // presses Generate (session.tsx → generateReport). This is what keeps empty
+  // "New session" chats from ever appearing after merely browsing Reports.
+  // A report session currently marked for this skill (e.g. one mid-generation
+  // that hasn't written its file yet). Never creates a session — only finds an
+  // existing one — so clicking a report while it is still generating returns to
+  // that run instead of opening a fresh Generate view.
+  const pendingSession = (skillName: string): string | undefined => {
     for (const id of layout.reportSessions.reportSessionIds(props.directory)) {
       if (layout.reportSessions.reportSkillForSession(props.directory, id) !== skillName) continue
       if (sync.session.get(id)) return id
@@ -425,16 +522,8 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
       .list({ path: "reports" })
       .then((r) => r.data)
       .catch(() => undefined)
-    // Open the right-hand panel only when a generated report file exists; for a
-    // not-yet-generated skill there is nothing to show, so just navigate into the
-    // session (the single "Generate" CTA lives in the composer). This gate is
-    // sidebar-local — session.tsx still auto-opens an existing report on generation.
     const { path, open: showPanel } = reportOpenTarget(files, skill.name)
-    const openPanel = (sessionId: string) => {
-      if (showPanel) {
-        requestOpenFile({ kind: "report", path, sessionId })
-        return
-      }
+    const clearPhantomReportTabs = (sessionId: string) => {
       // Users who hit the pre-fix bug still carry a persisted phantom
       // reports/*.mdx tab for this session (sessionTabs in the layout store),
       // and the side panel opens from persisted tabs, not only from
@@ -445,23 +534,31 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
         if (tab.startsWith("file://") && /(?:^|\/)reports\/[^/]+\.mdx?$/i.test(tab.slice(7))) tabs.close(tab)
       }
     }
-    const target = await resolveReportSessionId(sdk, sync, path)
-    if (target) {
-      layout.reportSessions.markReportSession(props.directory, target, skill.name)
-      openPanel(target)
-      navigate(`/${slug()}/session/${target}`)
+
+    if (showPanel) {
+      const target = await resolveReportSessionId(sdk, sync, path)
+      if (target) {
+        layout.reportSessions.markReportSession(props.directory, target, skill.name)
+        requestOpenFile({ kind: "report", path, sessionId: target })
+        navigate(`/${slug()}/session/${target}`)
+        return
+      }
+      // The file exists but its origin session can't be resolved (e.g. a
+      // bash-written report with empty frontmatter sessionId, or the session
+      // was deleted). Still show the existing report standalone — the same
+      // fallback the file-tree's openFromTree uses — instead of routing to the
+      // id-less Generate view, whose primary CTA would regenerate over it.
+      navigate(`/${slug()}/file/${encodeURIComponent(path)}`)
       return
     }
-    const pending = existingPendingSession(skill.name)
+
+    const pending = pendingSession(skill.name)
     if (pending) {
-      openPanel(pending)
+      clearPhantomReportTabs(pending)
       navigate(`/${slug()}/session/${pending}`)
       return
     }
-    const created = await createReportSession(skill.name)
-    if (!created) return
-    openPanel(created)
-    navigate(`/${slug()}/session/${created}`)
+    navigate(`/${slug()}/session?report=${encodeURIComponent(skill.name)}`)
   }
 
   return (

@@ -195,10 +195,15 @@ function createGlobalSync() {
       return
     }
 
-    const limit = Math.max(store.limit + SESSION_RECENT_LIMIT, SESSION_RECENT_LIMIT)
+    // The fetch window is wider than the visible base so the recency trim has
+    // rows to keep. The meta guard above must compare against the BASE
+    // (store.limit at completion, see below) — recording this window instead
+    // would make a later "Load more" (base 5→10) return early against the
+    // window (55) and never refetch the older roots the previous trim dropped.
+    const window = Math.max(store.limit + SESSION_RECENT_LIMIT, SESSION_RECENT_LIMIT)
     const promise = loadRootSessionsWithFallback({
       directory,
-      limit,
+      limit: window,
       list: (query) => globalSDK.client.session.list(query),
     })
       .then((x) => {
@@ -206,6 +211,8 @@ function createGlobalSync() {
           .filter((s) => !!s?.id)
           .filter((s) => !s.time?.archived)
           .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        // Read at completion, not at fetch start: a "Load more" bump that lands
+        // mid-flight is honored by this trim (the window above covers it).
         const limit = store.limit
         const childSessions = store.session.filter((s) => !!s.parentID)
         const sessions = trimSessions([...nonArchived, ...childSessions], {
