@@ -16,6 +16,7 @@ import type { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect } from "effect"
 import { EffectLogger } from "@/effect/logger"
+import { Spreadsheet } from "./spreadsheet"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -660,8 +661,13 @@ export namespace MessageV2 {
               type: "text",
               text: part.text,
             })
-          // text/plain and directory files are converted into text parts, ignore them
-          if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
+          // Text, directory, and spreadsheet files are converted into text parts, ignore the original file.
+          if (
+            part.type === "file" &&
+            part.mime !== "text/plain" &&
+            part.mime !== "application/x-directory" &&
+            !Spreadsheet.supports(part.mime)
+          ) {
             if (options?.stripMedia && isMedia(part.mime)) {
               userMessage.parts.push({
                 type: "text",

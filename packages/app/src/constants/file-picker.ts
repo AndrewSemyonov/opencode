@@ -1,8 +1,10 @@
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+export const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 export const ACCEPTED_FILE_TYPES = [
   ...ACCEPTED_IMAGE_TYPES,
   "application/pdf",
+  XLSX_MIME,
   "text/*",
   "application/json",
   "application/ld+json",
@@ -11,6 +13,7 @@ export const ACCEPTED_FILE_TYPES = [
   "application/x-yaml",
   "application/xml",
   "application/yaml",
+  ".xlsx",
   ".c",
   ".cc",
   ".cjs",
@@ -61,6 +64,7 @@ const MIME_EXT = new Map([
   ["image/gif", "gif"],
   ["image/webp", "webp"],
   ["application/pdf", "pdf"],
+  [XLSX_MIME, "xlsx"],
   ["application/json", "json"],
   ["application/ld+json", "jsonld"],
   ["application/toml", "toml"],
