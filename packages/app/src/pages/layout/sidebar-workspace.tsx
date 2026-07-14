@@ -26,7 +26,6 @@ import { SyncProvider, useSync } from "@/context/sync"
 import { requestOpenFile } from "@/pages/session/pending-file-open"
 import {
   extractSessionIdFromReport,
-  findLatestReportFileForSkill,
   findReportSkillForFile,
   findSessionIdByReportPath,
   hasRealReportArtifact,
@@ -34,6 +33,7 @@ import {
   mergeReportSkills,
   planReportReconcile,
   readReportSessionId,
+  reportOpenTarget,
   reportSkillCommands,
   resolveReportReconcile,
   type ReportSkillCommand,
@@ -389,7 +389,6 @@ function createReportSessionBackfill(input: {
   })
   createEffect(() => {
     const list = input.skills()
-    if (list.length === 0) return
     const current = ++token // supersede any in-flight pass
     void (async () => {
       let files: Awaited<ReturnType<typeof input.sdk.client.file.list>>["data"]
@@ -560,14 +559,24 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
   }
 
   const open = async (skill: ReportSkillCommand) => {
-    let path: string | undefined
-    try {
-      const res = await sdk.client.file.list({ path: "reports" })
-      path = findLatestReportFileForSkill(res.data, skill.name)
-    } catch {
-      path = undefined
+    const files = await sdk.client.file
+      .list({ path: "reports" })
+      .then((r) => r.data)
+      .catch(() => undefined)
+    const { path, open: showPanel } = reportOpenTarget(files, skill.name)
+    const clearPhantomReportTabs = (sessionId: string) => {
+      // Users who hit the pre-fix bug still carry a persisted phantom
+      // reports/*.mdx tab for this session (sessionTabs in the layout store),
+      // and the side panel opens from persisted tabs, not only from
+      // requestOpenFile — navigating back would re-open the panel. Drop stale
+      // report tabs when there is no generated file to show.
+      const tabs = layout.tabs(`${slug()}/${sessionId}`)
+      for (const tab of tabs.all()) {
+        if (tab.startsWith("file://") && /(?:^|\/)reports\/[^/]+\.mdx?$/i.test(tab.slice(7))) tabs.close(tab)
+      }
     }
-    if (path) {
+
+    if (showPanel) {
       const target = await resolveReportSessionId(sdk, sync, path)
       if (target) {
         layout.reportSessions.markReportSession(props.directory, target, skill.name)
@@ -583,8 +592,10 @@ const WorkspaceReportSkillListBody = (props: { directory: string }): JSX.Element
       navigate(`/${slug()}/file/${encodeURIComponent(path)}`)
       return
     }
+
     const pending = pendingSession(skill.name)
     if (pending) {
+      clearPhantomReportTabs(pending)
       navigate(`/${slug()}/session/${pending}`)
       return
     }

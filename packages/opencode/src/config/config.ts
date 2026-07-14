@@ -435,6 +435,7 @@ export namespace Config {
           __originalKeys: z.string().array().optional(),
           read: PermissionRule.optional(),
           edit: PermissionRule.optional(),
+          delete: PermissionRule.optional(),
           glob: PermissionRule.optional(),
           grep: PermissionRule.optional(),
           list: PermissionRule.optional(),

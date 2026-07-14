@@ -709,6 +709,16 @@ export default function Page() {
       // reconcile); a run that writes a file keeps its mark and stays in REPORTS.
       layout.reportSessions.markReportSession(sessionDirectory, sessionID, skillName)
 
+      // Set a deterministic title (the skill's own title) before sending the
+      // prompt. The server's title summarizer only fires when the session
+      // still has its default title (see ensureTitle's isDefaultTitle gate),
+      // and it checks that against a snapshot taken when prompt processing
+      // starts — so this MUST be awaited before sendFollowupDraft, or the
+      // summarizer can race it and title the session from the skill's own
+      // prompt template (which contains an illustrative example date).
+      const skill = reportSkills().find((s) => s.name === skillName)
+      await sdk.client.session.update({ sessionID, title: skill?.title ?? skillName }).catch(() => {})
+
       const text = `/${skillName}`
       await sendFollowupDraft({
         client: sdk.client,

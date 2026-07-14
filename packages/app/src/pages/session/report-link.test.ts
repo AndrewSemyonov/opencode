@@ -22,21 +22,32 @@ describe("isReportPath", () => {
     expect(isReportPath("reports/report.mdx?start=5&end=5")).toBe(true)
   })
 
+  test("matches a nested or absolute reports/ prefix too", () => {
+    expect(isReportPath("/workspace/reports/x.mdx")).toBe(true)
+    expect(isReportPath("docs/reports/notes.mdx")).toBe(true)
+  })
+
   test("rejects non-report paths", () => {
     expect(isReportPath("src/app.ts")).toBe(false)
-    expect(isReportPath("docs/reports/notes.md")).toBe(false) // not at root
+    expect(isReportPath("docs/reports/notes.md")).toBe(false) // wrong extension, not the nesting
     expect(isReportPath("reports/report.md")).toBe(false) // viewer needs .mdx
     expect(isReportPath("reportsx/report.mdx")).toBe(false)
   })
 })
 
 describe("reportLinkDate", () => {
-  test("uses the agent-written date as the button date", () => {
+  test("uses the agent-written date as the button date when it's a full date", () => {
     expect(reportLinkDate("21 июня 2026")).toBe("21 июня 2026")
-    expect(reportLinkDate("  за 21 июня  ")).toBe("за 21 июня")
+    expect(reportLinkDate("за 21 июня 2026 г.")).toBe("за 21 июня 2026 г.")
   })
 
-  test("shows no date for a bare report path (avoids a misleading generation date)", () => {
+  test("never derives a date from anything that isn't a full date", () => {
+    // No year — not a full date.
+    expect(reportLinkDate("  за 21 июня  ")).toBe("")
+    // Free text is not a date; the filename's generation timestamp is
+    // deliberately NOT used (it can differ from the report's data period).
+    expect(reportLinkDate("отчёт")).toBe("")
+    // Bare paths never count as dates.
     expect(reportLinkDate("reports/guests-2026-06-22-11:54.mdx")).toBe("")
     expect(reportLinkDate("")).toBe("")
   })
@@ -57,9 +68,24 @@ describe("markReportLinks (DOM relabel)", () => {
     expect(a.hasAttribute("rel")).toBe(false)
   })
 
-  test("bare report path gets a dateless label", () => {
+  test("a bare auto-linked path stays dateless (filename timestamp is not the report's date)", () => {
+    const root = document.createElement("div")
+    root.innerHTML =
+      '<a class="external-link" href="reports/x-2026-06-22-11:54.mdx">reports/x-2026-06-22-11:54.mdx</a>'
+    markReportLinks(root, label)
+    expect(root.querySelector("a")!.textContent).toBe("Отобразить отчёт")
+  })
+
+  test("no date at all when the filename itself carries no date", () => {
     const root = document.createElement("div")
     root.innerHTML = '<a href="reports/report.mdx">reports/report.mdx</a>'
+    markReportLinks(root, label)
+    expect(root.querySelector("a")!.textContent).toBe("Отобразить отчёт")
+  })
+
+  test("free text link content with no date anywhere stays dateless", () => {
+    const root = document.createElement("div")
+    root.innerHTML = '<a href="reports/top-3-dishes-2026-07-02-13:10.mdx">отчёт</a>'
     markReportLinks(root, label)
     expect(root.querySelector("a")!.textContent).toBe("Отобразить отчёт")
   })
@@ -71,6 +97,27 @@ describe("markReportLinks (DOM relabel)", () => {
     const a = root.querySelector("a")!
     expect(a.classList.contains("report-open-link")).toBe(false)
     expect(a.textContent).toBe("src/app.ts")
+  })
+
+  test("adopts (and strips) the report date the agent stated in prose right before the link", () => {
+    const root = document.createElement("div")
+    // Filename says June 30 (generation), prose says June 29 (report period) —
+    // the button must show the PROSE date, proving the filename is never used.
+    root.innerHTML =
+      '<p>Управленческий вывод: перепроверьте позиции. 29 июня 2026 <a href="reports/x-2026-06-30-09:15.mdx">отчёт</a></p>'
+    markReportLinks(root, label)
+    const p = root.querySelector("p")!
+    expect(p.querySelector("a")!.textContent).toBe("Отобразить отчёт 29 июня 2026")
+    expect(p.textContent).toBe("Управленческий вывод: перепроверьте позиции. Отобразить отчёт 29 июня 2026")
+  })
+
+  test("strips the prose date when it duplicates the link-text date", () => {
+    const root = document.createElement("div")
+    root.innerHTML =
+      '<p>Вывод: всё ок. 29 июня 2026 <a href="reports/x.mdx">29 июня 2026</a></p>'
+    markReportLinks(root, label)
+    const p = root.querySelector("p")!
+    expect(p.textContent).toBe("Вывод: всё ок. Отобразить отчёт 29 июня 2026")
   })
 
   test("is idempotent across re-decoration of freshly parsed nodes", () => {

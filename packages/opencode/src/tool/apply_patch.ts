@@ -190,6 +190,24 @@ export const ApplyPatchTool = Tool.define(
         },
       })
 
+      // File removal is gated behind the dedicated "delete" permission so a patch
+      // that removes files can be denied (by the active permission config) without
+      // blocking add/update edits, which stay under "edit". A "move" also deletes
+      // its source path, so it is gated too.
+      const deletes = fileChanges
+        .filter((change) => change.type === "delete" || change.type === "move")
+        .map((change) => change.filePath)
+      if (deletes.length > 0) {
+        yield* ctx.ask({
+          permission: "delete",
+          patterns: deletes,
+          always: deletes,
+          metadata: {
+            filepath: deletes.join(", "),
+          },
+        })
+      }
+
       // Apply the changes
       const updates: Array<{ file: string; event: "add" | "change" | "unlink" }> = []
 
